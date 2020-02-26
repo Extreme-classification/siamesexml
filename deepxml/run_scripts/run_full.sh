@@ -62,7 +62,6 @@ DEFAULT_PARAMS="--dataset ${dataset} \
 
 TRAIN_PARAMS="  --trans_method ${current_working_dir}/full.json \
                 --dropout 0.5 --optim Adam \
-                --num_clf_partitions 1\
                 --lr $learning_rate \
                 --model_method full \
                 --dlr_factor $dlr_factor \
@@ -81,7 +80,6 @@ then
                 --efC 300 \
                 --efS 300 \
                 --ns_method ${ns_method} \
-                --num_clf_partitions 1\
                 --model_method full \
                 --num_centroids ${num_centroids} \
 		        --lr $learning_rate \

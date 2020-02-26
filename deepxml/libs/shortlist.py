@@ -3,7 +3,6 @@ import numpy as np
 import multiprocessing as mp
 import libs.ANN as ANN
 import _pickle as pickle
-from .dist_utils import Partitioner
 import operator
 from scipy.sparse import csr_matrix, diags
 from .lookup import Table

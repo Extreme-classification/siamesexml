@@ -7,9 +7,8 @@ import numpy as np
 from sklearn.preprocessing import normalize
 from .dataset_base import DatasetBase
 import xclib.data.data_utils as data_utils
-from .dist_utils import Partitioner
 import operator
-from .lookup import Table, PartitionedTable
+from .lookup import Table
 from .shortlist_handler import construct_handler
 
 
@@ -180,9 +179,7 @@ class DatasetSparse(DatasetBase):
         self.multiple_cent_mapping = None
         self.shortlist_method = shortlist_method
         if self.mode == 'train':
-            # Remove samples w/o any feature or label
-            if self.shortlist_method != 'reranker':
-                self._remove_samples_wo_features_and_labels()
+            self._remove_samples_wo_features_and_labels()
         
         if not keep_invalid:
             # Remove labels w/o any positive instance

@@ -79,7 +79,7 @@ def collate_fn_dense_sl(batch):
     return batch_data
 
 
-def collate_fn_dense_full(batch, num_partitions):
+def collate_fn_dense_full(batch):
     """
         Combine each sample in a batch
         For dense features
@@ -96,12 +96,11 @@ def collate_fn_dense_full(batch, num_partitions):
     return batch_data
 
 
-def collate_fn_sparse_full(batch, num_partitions):
+def collate_fn_sparse_full(batch):
     """
         Combine each sample in a batch
         For sparse features
     """
-    _is_partitioned = True if num_partitions > 1 else False
     batch_data = {}
     batch_size = len(batch)
     seq_lengths = [len(item[0][0]) for item in batch]

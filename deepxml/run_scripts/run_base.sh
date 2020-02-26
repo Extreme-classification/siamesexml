@@ -107,14 +107,20 @@ gen_tail_emb ()
     # $3 version
     # $4 embedding_dims
 
-    result_dir=$1
-    model_dir="$(dirname "$2")"
-    embedding_dims=$3
+    data_dir=$1
+    result_dir=$2
+    model_dir="$(dirname "$3")"
+    version=$4
+    embedding_dims=$5
+    temp_dir=$6
     
+    original_emb="${data_dir}/fasttextB_embeddings_${embedding_dims}d.npy"
     gen_emb=$result_dir
+    feat_idx="${data_dir}/${temp_dir}/features_split_${version}.txt"
     out_emb="${model_dir}/head_embeddings_${embedding_dims}d.npy"
-    cp $gen_emb $out_emb
+    python ${work_dir}/programs/deepxml/deepxml/tools/init_embedding_from_head.py $original_emb $gen_emb $feat_idx $out_emb
 }
+
 
 print_mat () {
         # $1 result_dir
@@ -199,7 +205,7 @@ elif [ "${FLAG}" == "gen_tail_emb" ]
 then
     # $1 embedding files
     # $2 file 
-    gen_tail_emb $result_dir/$1 $model_dir $3
+    gen_tail_emb $data_dir $result_dir/$1 $model_dir $2 $3 $4
 
 else
     echo "Kuch bhi"

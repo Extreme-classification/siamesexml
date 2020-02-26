@@ -195,7 +195,7 @@ class ModelShortlist(ModelBase):
                 self.tracking.shortlist_time = self.tracking.shortlist_time \
                     + shorty_end_t - shorty_start_t
                 batch_train_start_time = time.time()
-            self._update_dynamic_negatives(train_loader_shuffle.dataset)
+            # self._update_dynamic_negatives(train_loader_shuffle.dataset)
             # update before each epoch
             tr_avg_loss = self._step(train_loader_shuffle, batch_div=True)
 
