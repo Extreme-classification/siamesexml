@@ -33,7 +33,7 @@ def load_emeddings(params):
     * vocabulary_dims must match #rows in embeddings
     """
     if params.use_head_embeddings:
-        embeddings = np.load(
+        w_embeddings = np.load(
             os.path.join(os.path.dirname(params.model_dir),
                          params.embeddings))
 
@@ -42,17 +42,31 @@ def load_emeddings(params):
             params.data_dir, params.dataset, params.embeddings)
         if Path(fname).is_file():
             print("Loading embeddings from file: {}".format(fname))
-            embeddings = np.load(fname)
+            w_embeddings = np.load(fname)
         else:
             print("Loading random embeddings")
-            embeddings = np.random.rand(
+            w_embeddings = np.random.rand(
                 params.vocabulary_dims, params.embedding_dims)
+
+    #  load sparse label features; used to initialize classifier
+    from xclib.data import data_utils
+    lbl_features = data_utils.read_sparse_file(
+        os.path.join(params.data_dir, params.dataset, 'lbl_X_Xf.txt'))[:, :-1]
+    from sklearn.preprocessing import normalize
+    lbl_features = normalize(lbl_features)
+    l_embeddings = lbl_features @ w_embeddings  # dense features
+    import pickle
+    indices = pickle.load(
+        open(os.path.join(os.path.dirname(params.model_dir),
+        'labels_params.pkl'), 'rb'))['valid_labels']
+    l_embeddings = l_embeddings[indices]  # keep valid labels only
+    #  l_embeddings = None
     if params.feature_indices is not None:
         indices = np.genfromtxt(params.feature_indices, dtype=np.int32)
-        embeddings = embeddings[indices, :]
+        w_embeddings = w_embeddings[indices, :]
         del indices
-    assert params.vocabulary_dims == embeddings.shape[0]
-    return embeddings
+    assert params.vocabulary_dims == w_embeddings.shape[0]
+    return w_embeddings, l_embeddings
 
 
 def pp_with_shorty(model, params, shorty):
@@ -90,7 +104,7 @@ def train(model, params):
         model_dir=params.model_dir,
         result_dir=params.result_dir,
         dataset=params.dataset,
-        data={'X': None, 'Y': None},
+        data={'X': None, 'Y': None, 'Yf': None},
         learning_rate=params.learning_rate,
         num_epochs=params.num_epochs,
         tr_feat_fname=params.tr_feat_fname,
@@ -98,6 +112,7 @@ def train(model, params):
         tr_label_fname=params.tr_label_fname,
         val_label_fname=params.val_label_fname,
         batch_size=params.batch_size,
+        lbl_feat_fname=params.lbl_feat_fname,
         num_workers=params.num_workers,
         normalize_features=params.normalize,
         normalize_labels=params.nbn_rel,
@@ -109,6 +124,7 @@ def train(model, params):
         shortlist_method=params.shortlist_method,
         validate_after=params.validate_after,
         feature_indices=params.feature_indices,
+        use_coarse=params.use_coarse_for_shorty,
         label_indices=params.label_indices)
     model.save(params.model_dir, params.model_fname)
 
@@ -133,7 +149,7 @@ def get_document_embeddings(model, params, _save=True):
         dataset=params.dataset,
         fname_features=params.ts_feat_fname,
         fname_labels=params.ts_label_fname,
-        data={'X': None, 'Y': None},
+        data={'X': None, 'Y': None, 'Yf': None},
         fname_out=fname_temp,
         return_coarse=params.use_coarse_for_shorty,
         keep_invalid=params.keep_invalid,
@@ -209,12 +225,13 @@ def inference(model, params):
         dataset=params.dataset,
         ts_label_fname=params.ts_label_fname,
         ts_feat_fname=params.ts_feat_fname,
+        lbl_feat_fname=params.lbl_feat_fname,
         normalize_features=params.normalize,
         normalize_labels=params.nbn_rel,
         beta=params.beta,
         num_workers=params.num_workers,
         top_k=params.top_k,
-        data={'X': None, 'Y': None},
+        data={'X': None, 'Y': None, 'Yf': None},
         keep_invalid=params.keep_invalid,
         feature_indices=params.feature_indices,
         label_indices=params.label_indices,
@@ -261,7 +278,7 @@ def construct_shortlist(params):
     if params.shortlist_method == 'reranker':
         return None
 
-    if params.use_shortlist == -1:
+    if not params.use_shortlist:
         return None
 
     if params.ns_method == 'ns':  # Negative Sampling
@@ -271,14 +288,14 @@ def construct_shortlist(params):
             shorty = negative_sampling.NegativeSampler(
                 params.num_labels, params.num_nbrs, None, False)
     elif params.ns_method == 'kcentroid':
-        if params.num_clf_partitions > 1:
-            shorty = shortlist.ParallelShortlist(
-                params.ann_method, params.num_nbrs, params.M, params.efC,
-                params.efS, params.ann_threads, params.num_clf_partitions)
-        else:
-            shorty = shortlist.ShortlistCentroids(
-                params.ann_method, params.num_nbrs, params.M,
-                params.efC, params.efS, params.ann_threads)
+        shorty = shortlist.ShortlistCentroids(
+            params.ann_method, params.num_nbrs, params.M,
+            params.efC, params.efS, params.ann_threads,
+            num_clusters=params.num_centroids)
+    elif params.ns_method == 'ensemble':
+        shorty = shortlist.ShortlistEnsemble(
+            params.ann_method, params.num_nbrs, params.M,
+            params.efC, params.efS, params.ann_threads)
     else:
         raise NotImplementedError("Not yet implemented!")
     return shorty
@@ -299,9 +316,6 @@ def construct_model(params, net, criterion, optimizer, shorty):
             params, net, criterion, optimizer, shorty)
     elif params.model_method == 'full':
         model = model_utils.ModelFull(params, net, criterion, optimizer)
-    elif params.model_method == 'reranker':
-        model = model_utils.ModelReRanker(
-            params, net, criterion, optimizer, shorty)
     else:
         raise NotImplementedError("Unknown model_method.")
     return model
@@ -313,13 +327,16 @@ def main(params):
     """
     if params.mode == 'train':
         # Use last index as padding label
-        if params.num_centroids != 1:
+        if params.use_shortlist:
             params.label_padding_index = params.num_labels
         net = construct_network(params)
-        embeddings = load_emeddings(params)
+        word_embeddings, label_embeddings = load_emeddings(params)
         net.initialize_embeddings(
-            utils.append_padding_embedding(embeddings))
-        del embeddings
+            utils.append_padding_embedding(word_embeddings))
+        #  net.initialize_classifier(label_embeddings)
+        net.initialize_classifier(
+           utils.append_padding_embedding(label_embeddings, -1))
+        del word_embeddings, label_embeddings
         print("Initialized embeddings!")
         criterion = torch.nn.BCEWithLogitsLoss(
            reduction='sum' if params.use_shortlist else 'mean')
@@ -381,24 +398,6 @@ def main(params):
         model.transfer_to_devices()
         model.load(params.model_dir, params.model_fname)
         inference(model, params)
-
-    elif params.mode == 'retrain_w_shorty':
-        #  Train ANNS for 1-vs-all classifier
-        fname = os.path.join(params.result_dir, 'params.json')
-        utils.load_parameters(fname, params)
-        #  Pad label in case of multiple-centroids
-        if params.num_centroids != 1:
-            params.label_padding_index = params.num_labels
-        net = construct_network(params)
-        print("Model parameters: ", params)
-        print("\nModel configuration: ", net)
-        shorty = construct_shortlist(params)
-        model = construct_model(
-            params, net, criterion=None, optimizer=None, shorty=shorty)
-        model.load(params.model_dir, params.model_fname)
-        model.transfer_to_devices()
-        pp_with_shorty(model, params, shorty)
-        utils.save_parameters(fname, params)
 
     elif params.mode == 'extract':
         fname = os.path.join(params.result_dir, 'params.json')

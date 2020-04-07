@@ -12,8 +12,8 @@ from .lookup import Table
 from .shortlist_handler import construct_handler
 
 
-def construct_dataset(data_dir, fname_features, fname_labels, data=None,
-                      model_dir='', mode='train', size_shortlist=-1,
+def construct_dataset(data_dir, fname_features, fname_labels, fname_lbl_features=None, 
+                      data=None, model_dir='', mode='train', size_shortlist=-1,
                       normalize_features=True, normalize_labels=True,
                       keep_invalid=False, num_centroids=1,
                       feature_type='sparse', feature_indices=None,
@@ -21,15 +21,15 @@ def construct_dataset(data_dir, fname_features, fname_labels, data=None,
                       shorty=None):
     if size_shortlist == -1:
         return DatasetDense(
-            data_dir, fname_features, fname_labels, data, model_dir, mode,
-            feature_indices, label_indices, keep_invalid, normalize_features,
-            normalize_labels, feature_type)
+            data_dir, fname_features, fname_labels, fname_lbl_features, data,
+            model_dir, mode, feature_indices, label_indices, keep_invalid,
+            normalize_features, normalize_labels, feature_type)
     else:
         #  Construct dataset for sparse data
         return DatasetSparse(
-            data_dir, fname_features, fname_labels, data, model_dir, mode,
-            feature_indices, label_indices, keep_invalid, normalize_features,
-            normalize_labels, size_shortlist, num_centroids,
+            data_dir, fname_features, fname_labels, fname_lbl_features, 
+            data, model_dir, mode, feature_indices, label_indices, keep_invalid,
+            normalize_features, normalize_labels, size_shortlist, num_centroids,
             feature_type, shortlist_method, shorty)
 
 
@@ -68,11 +68,10 @@ class DatasetDense(DatasetBase):
         sparse (i.e. with shortlist) or dense (OVA) labels
     """
 
-    def __init__(self, data_dir, fname_features, fname_labels, data=None,
-                 model_dir='', mode='train', feature_indices=None,
-                 label_indices=None, keep_invalid=False,
-                 normalize_features=True, normalize_labels=False,
-                 feature_type='sparse', label_type='dense'):
+    def __init__(self, data_dir, fname_features, fname_labels, fname_lbl_features=None, 
+                 data=None, model_dir='', mode='train', feature_indices=None,
+                 label_indices=None, keep_invalid=False, normalize_features=True,
+                 normalize_labels=False, feature_type='sparse', label_type='dense'):
         """
             Expects 'libsvm' format with header
             Args:
@@ -118,6 +117,8 @@ class DatasetSparse(DatasetBase):
         feature file (libsvm or pickle)
     fname_labels: str
         labels file (libsvm or pickle)    
+    fname_lbl_features: str
+        features for each label (libsvm or pickle)    
     data: dict, optional, default=None
         Read data directly from this obj rather than files
         Files are ignored if this is not None
@@ -151,8 +152,8 @@ class DatasetSparse(DatasetBase):
         Keep shortlist in memory if True otherwise keep on disk
     """
 
-    def __init__(self, data_dir, fname_features, fname_labels, data=None,
-                 model_dir='', mode='train', feature_indices=None,
+    def __init__(self, data_dir, fname_features, fname_labels, fname_lbl_features, 
+                 data=None, model_dir='', mode='train', feature_indices=None,
                  label_indices=None, keep_invalid=False,
                  normalize_features=True, normalize_labels=False,
                  size_shortlist=-1, num_centroids=1, feature_type='sparse',
@@ -163,7 +164,6 @@ class DatasetSparse(DatasetBase):
             Args:
                 data_file: str: File name for the set
         """
-        self._ext_head = None
         super().__init__(data_dir, fname_features, fname_labels, data,
                          model_dir, mode, feature_indices, label_indices,
                          keep_invalid, normalize_features, normalize_labels,
@@ -175,8 +175,10 @@ class DatasetSparse(DatasetBase):
         self.feature_type = feature_type
         self.num_centroids = num_centroids
         self.shortlist_in_memory = shortlist_in_memory
+        # Load label features
+        # Assumption: fixed pre-supplied label features
+        self.lbl_features = self.load_label_features(fname_lbl_features, data, model_dir, label_indices)
         self.size_shortlist = size_shortlist
-        self.multiple_cent_mapping = None
         self.shortlist_method = shortlist_method
         if self.mode == 'train':
             self._remove_samples_wo_features_and_labels()
@@ -186,19 +188,31 @@ class DatasetSparse(DatasetBase):
             self._process_labels(model_dir)
 
         self.shortlist = construct_handler(
-            shortlist_method=shortlist_method, 
-            num_labels=self.num_labels, 
-            shortlist=None, 
+            shortlist_method=shortlist_method,
+            num_labels=self.num_labels,
+            shortlist=None,
             model_dir=model_dir,
             mode=mode,
             size_shortlist=size_shortlist,
-            num_centroids=num_centroids,
-            label_mapping=self.multiple_cent_mapping,
             in_memory=shortlist_in_memory,
             shorty=shorty,
             corruption=corruption)
         self.use_shortlist = True if self.size_shortlist > 0 else False
         self.label_padding_index = self.num_labels
+
+    def load_label_features(self, fname, data, model_dir, label_indices):
+        lbl_features = None
+        if fname is not None or data['Yf'] is not None:
+            # label embeddings will be kept in model directory
+            lbl_features = self.load_features(
+                data_dir=os.path.dirname(model_dir), fname=fname,
+                X=data['Yf'], normalize_features=False,
+                feature_type='dense')
+            if label_indices is not None:
+                label_indices = np.loadtxt(label_indices, dtype=np.int32)
+                lbl_features.index_select(label_indices, axis=0)
+            print("Label embedding loaded.")
+        return lbl_features
 
     def update_shortlist(self, shortlist, dist, fname='tmp', idx=-1):
         """Update label shortlist for each instance
@@ -215,74 +229,41 @@ class DatasetSparse(DatasetBase):
         """
         self.shortlist.load_shortlist(fname)
 
-    def _get_ext_head(self, freq, threshold):
-        """Get super-head labels i.e. too many positive points
-        """
-        return np.where(freq >= threshold)[0]
-
-    def _process_labels_train(self, data_obj, _ext_head_threshold):
+    def _process_labels_train(self, data_obj):
         """Process labels for train data
             - Remove labels without any training instance
-            - Handle multiple centroids
         """
-        super()._process_labels_train(data_obj)
-        data_obj['ext_head'] = None
-        data_obj['multiple_cent_mapping'] = None
-        print("Valid labels after processing: ", self.num_labels)
-        if self.num_centroids != 1:
-            freq = self.labels.frequency()
-            self._ext_head = self._get_ext_head(freq, _ext_head_threshold)
-            self.multiple_cent_mapping = np.arange(self.num_labels)
-            for idx in self._ext_head:
-                self.multiple_cent_mapping = np.append(
-                    self.multiple_cent_mapping, [idx]*self.num_centroids)
-            data_obj['ext_head'] = self._ext_head
-            data_obj['multiple_cent_mapping'] = self.multiple_cent_mapping
+        data_obj['num_labels'] = self.num_labels
+        ind_0 = self.labels.get_valid()
+        ind_1 = np.where(np.square(self.lbl_features.data).sum(axis=1))[0] #nnz vectors
+        valid_labels = np.intersect1d(ind_0, ind_1)
+        self._valid_labels = valid_labels
+        print("#Valid labels: {}".format(len(valid_labels)))
+        self.lbl_features.index_select(valid_labels, axis=0)
+        self.labels.index_select(valid_labels, axis=1)
+        data_obj['valid_labels'] = valid_labels
 
-    def _process_labels_predict(self, data_obj):
-        """Process labels for test data
-        """
-        super()._process_labels_predict(data_obj)
-        try:
-            self._ext_head = data_obj['ext_head']
-            self.multiple_cent_mapping = data_obj['multiple_cent_mapping']
-        except KeyError:
-            self._ext_head = None
-            self.multiple_cent_mapping = None
-
-    def _process_labels_retrain_w_shortlist(self, data_obj,
-                                            _ext_head_threshold):
+    def _process_labels_retrain_w_shortlist(self, data_obj):
         """Process labels for retrain with shortlist
         Useful for training labels shortlist after OVA training
         """
         super()._process_labels_predict(data_obj)
-        if self.num_centroids != 1:
-            print("Creating multiple centroid mappings..")
-            freq = self.labels.frequency()
-            self._ext_head = self._get_ext_head(freq, _ext_head_threshold)
-            self.multiple_cent_mapping = np.arange(self.num_labels)
-            for idx in self._ext_head:
-                self.multiple_cent_mapping = np.append(
-                    self.multiple_cent_mapping, [idx]*self.num_centroids)
-            data_obj['ext_head'] = self._ext_head
-            data_obj['multiple_cent_mapping'] = self.multiple_cent_mapping
 
-    def _process_labels(self, model_dir, _ext_head_threshold=10000):
+    def _process_labels(self, model_dir):
         """
             Process labels to handle labels without any training instance;
-            Handle multiple centroids if required
         """
         data_obj = {}
         fname = os.path.join(
             model_dir, 'labels_params.pkl' if self._split is None else
             "labels_params_split_{}.pkl".format(self._split))
         if self.mode == 'train':
-            self._process_labels_train(data_obj, _ext_head_threshold)
+            self._process_labels_train(data_obj)
             pickle.dump(data_obj, open(fname, 'wb'))
         elif self.mode == 'retrain_w_shortlist':
             data_obj = pickle.load(open(fname, 'rb'))
             self._process_labels_retrain_w_shortlist(
-                data_obj, _ext_head_threshold)
+                data_obj)
             pickle.dump(data_obj, open(fname, 'wb'))
         else:
             data_obj = pickle.load(open(fname, 'rb'))

@@ -9,25 +9,25 @@ from xclib.utils import sparse as sp
 from .utils import add_noise
 
 
-def construct_handler(shortlist_method, num_labels, shortlist=None, model_dir='',
-                   mode='train', size_shortlist=-1,
-                   num_centroids=1, label_mapping=None, in_memory=True, 
-                   shorty=None, corruption=200):
+def construct_handler(shortlist_method, num_labels, shortlist=None,
+                      model_dir='', mode='train', size_shortlist=-1,
+                      label_mapping=None, in_memory=True,
+                      shorty=None, corruption=200):
     if shortlist_method == 'static':
         return ShortlistHandlerStatic(
-            num_labels, model_dir, mode, size_shortlist, num_centroids,
+            num_labels, model_dir, mode, size_shortlist,
             in_memory, label_mapping)
     elif shortlist_method == 'extended':
         return ShortlistHandlerExtended(
-            num_labels, model_dir, mode, size_shortlist, num_centroids,
+            num_labels, model_dir, mode, size_shortlist,
             in_memory, label_mapping, corruption)
     elif shortlist_method == 'hybrid':
         return ShortlistHandlerHybrid(
-            num_labels, model_dir, mode, size_shortlist, num_centroids,
+            num_labels, model_dir, mode, size_shortlist,
             in_memory, label_mapping, corruption)
     elif shortlist_method == 'dynamic':
         return ShortlistHandlerDynamic(
-            num_labels, shorty, model_dir, mode, size_shortlist, num_centroids,
+            num_labels, shorty, model_dir, mode, size_shortlist,
             label_mapping)
     else:
         raise NotImplementedError(
@@ -50,17 +50,13 @@ class ShortlistHandlerBase(object):
         mode i.e. train or test or val
     size_shortlist:int, optional, default=-1
         get shortlist of this size
-    num_centroids: int, optional, default=1
-        #centroids (useful when using multiple rep)
     label_mapping: None or dict: optional, default=None
         map labels as per this mapping
     """
 
     def __init__(self, num_labels, shortlist, model_dir='',
-                 mode='train', size_shortlist=-1, num_centroids=1,
-                 label_mapping=None):
+                 mode='train', size_shortlist=-1, label_mapping=None):
         self.model_dir = model_dir
-        self.num_centroids = num_centroids
         self.size_shortlist = size_shortlist
         self.mode = mode
         self.num_labels = num_labels
@@ -82,22 +78,6 @@ class ShortlistHandlerBase(object):
         indices.extend([self.label_padding_index]*_pad_length)
         sim.extend([-100]*_pad_length)
 
-    def _remap_multiple_representations(self, indices, vals,
-                                        _func=min, _limit=1e5):
-        """
-            Remap multiple centroids to original labels
-        """
-        indices = np.asarray(
-            list(map(lambda x: self.label_mapping[x], indices)))
-        _dict = dict({})
-        for id, ind in enumerate(indices):
-            _dict[ind] = _func(_dict.get(ind, _limit), vals[id])
-        indices, values = zip(*_dict.items())
-        indices, values = list(indices), list(values)
-        if len(indices) < self.size_shortlist:
-            self._pad_seq(indices, values)
-        return indices, values
-
     def _adjust_shortlist(self, pos_labels, shortlist, sim, min_nneg=100):
         """
             Adjust shortlist for a instance
@@ -105,36 +85,44 @@ class ShortlistHandlerBase(object):
             Inference: Return shortlist with label mask
         """
         if self.mode == 'train':
+            labels_mask = np.zeros(self.size_shortlist, dtype=np.float32)
+            sim_mask = np.zeros(self.size_shortlist, dtype=np.float32)
+            label_shortlist = np.full(
+                self.size_shortlist, fill_value=self.label_padding_index,
+                dtype=np.int64)
             # TODO: Adjust dist as well
             # If number of positives are more than shortlist_size
             if len(pos_labels) > self.size_shortlist:
                 _ind = np.random.choice(
-                    len(pos_labels), size=self.size_shortlist-min_nneg, replace=False)
-                pos_labels = np.fromiter(operator.itemgetter(*_ind)(pos_labels), dtype=np.int64)
+                    len(pos_labels), size=self.size_shortlist-min_nneg,
+                    replace=False)
+                pos_labels = np.fromiter(
+                    operator.itemgetter(*_ind)(pos_labels),
+                    dtype=np.int64)
             neg_labels = np.fromiter(
-                filter(lambda x: x not in set(pos_labels), shortlist), dtype=np.int64)
-            diff = self.size_shortlist - len(pos_labels)
-
-            labels_mask = np.ones(self.size_shortlist, dtype=np.float32)
-            labels_mask[len(pos_labels):] = 0.0 # zero for negatives
-            sim_mask = np.concatenate([2*np.ones(len(pos_labels)), sim[:diff]])
-            shortlist = np.concatenate([pos_labels, neg_labels[:diff]])
+                filter(lambda x: x not in set(pos_labels), shortlist),
+                dtype=np.int64)
+            labels_mask[:len(pos_labels)] = 1.0
+            sim_mask[:len(pos_labels)] = 1.0 # not used during training; not perfect values
+            _shortlist = np.concatenate([pos_labels, neg_labels])
+            label_shortlist[:min(len(_shortlist), self.size_shortlist)] = _shortlist[:min(len(_shortlist), self.size_shortlist)]
         else:
             labels_mask = np.zeros(self.size_shortlist, dtype=np.float32)
+            label_shortlist = np.full(
+                self.size_shortlist, fill_value=self.label_padding_index,
+                dtype=np.int64)
+            label_shortlist[:len(shortlist)] = shortlist
             pos_labels = set(pos_labels)
             for idx, item in enumerate(shortlist):
-                if item in pos_labels:
+                if item in pos_labels:                
                     labels_mask[idx] = 1
-            sim_mask = sim
-        return shortlist, labels_mask, sim_mask
+            sim_mask = np.zeros(self.size_shortlist, dtype=np.float32)
+            sim_mask[:len(shortlist)] = sim
+        return label_shortlist, labels_mask, sim_mask
 
     def _get_sl(self, index, pos_labels):
         if self.shortlist.data_init:
             shortlist, sim = self.query(index)
-            # Remap to original labels if multiple centroids are used
-            if self.num_centroids != 1:
-                shortlist, sim = self._remap_multiple_representations(
-                    shortlist, sim)
             shortlist, labels_mask, sim = self._adjust_shortlist(
                 pos_labels, shortlist, sim)
         else:
@@ -153,7 +141,6 @@ class ShortlistHandlerBase(object):
 class ShortlistHandlerStatic(ShortlistHandlerBase):
     """ShortlistHandler with static shortlist
     - save/load/update/process shortlist
-    - support for multiple representations for labels
     Parameters
     ----------
     num_labels: int
@@ -164,8 +151,6 @@ class ShortlistHandlerStatic(ShortlistHandlerBase):
         mode i.e. train or test or val
     size_shortlist:int, optional, default=-1
         get shortlist of this size
-    num_centroids: int, optional, default=1
-        #centroids (useful when using multiple rep)
     in_memory: bool: optional, default=True
         Keep the shortlist in memory or on-disk
     label_mapping: None or dict: optional, default=None
@@ -173,10 +158,9 @@ class ShortlistHandlerStatic(ShortlistHandlerBase):
     """
 
     def __init__(self, num_labels, model_dir='', mode='train',
-                 size_shortlist=-1, num_centroids=1,
-                 in_memory=True, label_mapping=None):
-        super().__init__(num_labels, None, model_dir, mode, 
-                         size_shortlist, num_centroids, label_mapping)
+                 size_shortlist=-1, in_memory=True, label_mapping=None):
+        super().__init__(num_labels, None, model_dir, mode,
+                         size_shortlist, label_mapping)
         self.in_memory = in_memory
         self._create_shortlist()
 
@@ -241,17 +225,14 @@ class ShortlistHandlerDynamic(ShortlistHandlerBase):
         mode i.e. train or test or val
     size_shortlist:int, optional, default=-1
         get shortlist of this size
-    num_centroids: int, optional, default=1
-        #centroids (useful when using multiple rep)
     label_mapping: None or dict: optional, default=None
         map labels as per this mapping
     """
 
     def __init__(self, num_labels, shortlist, model_dir='',
-                 mode='train', size_shortlist=-1,
-                 num_centroids=1, label_mapping=None):
+                 mode='train', size_shortlist=-1, label_mapping=None):
         super().__init__(num_labels, shortlist, model_dir, mode,
-                         size_shortlist, num_centroids, label_mapping)
+                         size_shortlist, label_mapping)
         self._create_shortlist(shortlist)
 
     def query(self, index):
@@ -272,8 +253,6 @@ class ShortlistHandlerHybrid(ShortlistHandlerBase):
         mode i.e. train or test or val
     size_shortlist:int, optional, default=-1
         get shortlist of this size
-    num_centroids: int, optional, default=1
-        #centroids (useful when using multiple rep)
     in_memory: bool: optional, default=True
         Keep the shortlist in memory or on-disk
     label_mapping: None or dict: optional, default=None
@@ -283,15 +262,15 @@ class ShortlistHandlerHybrid(ShortlistHandlerBase):
     """
 
     def __init__(self, num_labels, model_dir='', mode='train',
-                 size_shortlist=-1, num_centroids=1,
-                 in_memory=True, label_mapping=None, _corruption=200):
+                 size_shortlist=-1, in_memory=True,
+                 label_mapping=None, _corruption=200):
         super().__init__(num_labels, None, model_dir, mode,
-                         size_shortlist, num_centroids, label_mapping)
+                         size_shortlist, label_mapping)
         self.in_memory = in_memory
         self._create_shortlist()
         # Some labels will be repeated, so keep it low
         self.shortlist_dynamic = NegativeSampler(
-            num_labels, _corruption+75, replace=True)
+            num_labels, _corruption+350, replace=True)
         self.size_shortlist = size_shortlist+_corruption  # Both
 
     def query(self, index):
@@ -357,8 +336,6 @@ class ShortlistHandlerExtended(ShortlistHandlerBase):
         mode i.e. train or test or val
     size_shortlist:int, optional, default=-1
         get shortlist of this size
-    num_centroids: int, optional, default=1
-        #centroids (useful when using multiple rep)
     in_memory: bool: optional, default=True
         Keep the shortlist in memory or on-disk
     label_mapping: None or dict: optional, default=None
@@ -368,10 +345,10 @@ class ShortlistHandlerExtended(ShortlistHandlerBase):
     """
 
     def __init__(self, num_labels, model_dir='', mode='train',
-                 size_shortlist=-1, num_centroids=1, in_memory=True,
+                 size_shortlist=-1, in_memory=True,
                  label_mapping=None, _corruption=200):
         super().__init__(num_labels, None, model_dir, mode,
-                         size_shortlist, num_centroids, label_mapping)
+                         size_shortlist, label_mapping)
         self.in_memory = in_memory
         self._create_shortlist()
         # Some labels will be repeated, so keep it low
