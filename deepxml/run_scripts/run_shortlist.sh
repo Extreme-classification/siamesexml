@@ -28,12 +28,13 @@ stats=($(echo $stats | tr ',' "\n"))
 vocabulary_dims=${stats[0]}
 num_labels=${stats[2]}
 echo $num_labels $(wc -l ${data_dir}/${dataset}/${temp_model_data}/${split_threhold}/labels_split_${quantile}.txt)
-extra_params="--feature_indices ${data_dir}/${dataset}/${temp_model_data}/${split_threhold}/features_split_${quantile}.txt \
-                --label_indices ${data_dir}/${dataset}/${temp_model_data}/${split_threhold}/labels_split_${quantile}.txt"
 
 if [ $quantile -eq -1 ]
 then
     extra_params=""    
+else
+    extra_params="--feature_indices ${data_dir}/${dataset}/${temp_model_data}/${split_threhold}/features_split_${quantile}.txt \
+                --label_indices ${data_dir}/${dataset}/${temp_model_data}/${split_threhold}/labels_split_${quantile}.txt"
 fi
 
 if [ $use_head_embeddings -eq 1 ]
@@ -57,6 +58,7 @@ DEFAULT_PARAMS="--dataset ${dataset} \
                 --tr_label_fname trn_X_Y.txt \
 		        --val_feat_fname tst_X_Xf.txt \
                 --val_label_fname tst_X_Y.txt \
+                --lbl_feat_fname lbl_emb.npy \
                 --ts_feat_fname tst_X_Xf.txt \
                 --ts_label_fname tst_X_Y.txt \
                 --freeze_embeddings \
@@ -77,7 +79,7 @@ TRAIN_PARAMS="--dlr_factor $dlr_factor \
             --lr ${learning_rate} \
             --efS 300 \
             --normalize \
-            --num_nbrs 300 \
+            --num_nbrs 600 \
             --efC 300 \
             --M 100 \
             --use_shortlist \
@@ -90,7 +92,7 @@ TRAIN_PARAMS="--dlr_factor $dlr_factor \
             ${DEFAULT_PARAMS}"
 
 PREDICT_PARAMS="--efS 300 \
-                --num_nbrs 300 \
+                --num_nbrs 600 \
                 --model_method shortlist \
                 --ann_threads 12\
                 --normalize \
@@ -114,6 +116,7 @@ EXTRACT_PARAMS="--dataset ${dataset} \
 ./run_base.sh "train" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${TRAIN_PARAMS}"
 ./run_base.sh "predict" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${PREDICT_PARAMS} --use_coarse_for_shorty"
 
+exit
 #./run_base.sh "extract" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${EXTRACT_PARAMS} --ts_feat_fname 0 --out_fname export/wrd_emb"
 
 for doc in ${docs[*]}

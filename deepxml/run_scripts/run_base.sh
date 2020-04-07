@@ -80,11 +80,12 @@ evaluate () {
         # $2 train
         # $3 test
         # $4 pred_fname path
-        # $5 A
-        # $6 B
-        # $7 TYPE and BETAS
+        # $5 filter map
+        # $6 A
+        # $7 B
+        # $8 BETAS
         log_eval_file="${1}/log_eval.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/tools/evaluate.py "${2}" "${3}" "${4}" $5 $6 $7 | tee -a $log_eval_file
+        python -u ${work_dir}/programs/deepxmlpp/deepxml/tools/evaluate.py "${2}" "${3}" "${4}" "$5" $6 $7 $8 | tee -a $log_eval_file
 }
 
 post_process(){
@@ -119,6 +120,15 @@ gen_tail_emb ()
     feat_idx="${data_dir}/${temp_dir}/features_split_${version}.txt"
     out_emb="${model_dir}/head_embeddings_${embedding_dims}d.npy"
     python ${work_dir}/programs/deepxml/deepxml/tools/init_embedding_from_head.py $original_emb $gen_emb $feat_idx $out_emb
+}
+
+gen_lbl_emb ()
+{
+    # $1 model directory
+    # $2 file name
+    model_dir="$(dirname "$1")"
+    fname=$2
+    cp ${fname} ${model_dir}
 }
 
 
@@ -166,10 +176,11 @@ then
 elif [ "${FLAG}" == "evaluate" ]
 then
     # $1 Out_file
-    # $2 A
-    # $3 B
-    # $4 TYPE and BETAS
-    evaluate $result_dir $data_dir'/trn_X_Y.txt' $data_dir'/tst_X_Y.txt' "${result_dir}/${1}" ${2} ${3} "${4}"
+    # $2 filter fname
+    # $3 A
+    # $4 B
+    # $5 BETAS
+    evaluate $result_dir $data_dir'/trn_X_Y.txt' $data_dir'/tst_X_Y.txt' "${result_dir}/${1}" ${2} ${3} ${4} "${5}"
 
 elif [ "${FLAG}" == "print_mat" ]
 then
@@ -207,7 +218,12 @@ then
     # $2 file 
     gen_tail_emb $data_dir $result_dir/$1 $model_dir $2 $3 $4
 
+elif [ "${FLAG}" == "gen_lbl_emb" ]
+then
+    # $1 embedding files
+    gen_lbl_emb $model_dir $result_dir/$1
 else
+
     echo "Kuch bhi"
 
 fi

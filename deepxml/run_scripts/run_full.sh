@@ -18,9 +18,10 @@ topk=${15}
 num_centroids=${16}
 ns_method=${17}
 use_head_embeddings=0
+ns_method='kcentroid'
 data_dir="${work_dir}/data"
 current_working_dir=$(pwd)
-docs=("trn" "tst")
+docs=("trn" "tst" "lbl")
 
 if [ $use_head_embeddings -eq 1 ]
 then
@@ -145,17 +146,19 @@ then
   ./run_base.sh "retrain_w_shortlist" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${TRAIN_PARAMS_post}"
 fi
 
-./run_base.sh "predict" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${PREDICT_PARAMS}"
-./run_base.sh "extract" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${EXTRACT_PARAMS} --ts_feat_fname 0 --out_fname export/wrd_emb"
 
-if [ $quantile -gt -1 ]
-then
-    echo -e "\nGenerating Head Embeddings"
-    ./run_base.sh "gen_tail_emb" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "export/wrd_emb.npy" $quantile $embedding_dims "${temp_model_data}/${split_threhold}"
-fi
+#./run_base.sh "predict" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${PREDICT_PARAMS}"
+./run_base.sh "extract" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${EXTRACT_PARAMS} --ts_feat_fname 0 --out_fname export/wrd_emb"
 
 for doc in ${docs[*]} 
 do 
     ./run_base.sh "extract" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${EXTRACT_PARAMS} --ts_feat_fname ${doc}_X_Xf.txt --ts_label_fname ${doc}_X_Y.txt --out_fname export/${doc}_emb"
     # ./run_base.sh "postprocess" $dataset $work_dir $dir_version/$quantile "export/${doc}_emb.npy" "${doc}"
 done
+
+if [ $quantile -gt -1 ]
+then
+    echo -e "\nGenerating word and tail embeddings"
+    ./run_base.sh "gen_tail_emb" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "export/wrd_emb.npy" $quantile $embedding_dims "${temp_model_data}/${split_threhold}"
+    ./run_base.sh "gen_lbl_emb" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "export/lbl_emb.npy"
+fi
