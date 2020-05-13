@@ -1,5 +1,80 @@
 import torch
 import numpy as np
+from torch.nn.utils.rnn import pad_sequence
+
+
+def pad_and_collate(x, pad_val=0, dtype=torch.FloatTensor):
+    """
+    A generalized function for padding batch using utils.rnn.pad_sequence
+    * pad as per the maximum length in the batch
+    * returns a collated tensor
+
+    Arguments:
+    ---------
+    x: iterator
+        iterator over np.ndarray that needs to be converted to
+        tensors and padded
+    pad_val: float
+        pad tensor with this value
+        will cast the value as per the data type
+    dtype: datatype, optional (default=torch.FloatTensor)
+        tensor should be of this type
+    """
+    return pad_sequence(list(map(lambda z: torch.from_numpy(z), x)),
+                        batch_first=True, padding_value=pad_val).type(dtype)
+
+
+def collate_dense(x, dtype=torch.FloatTensor):
+    """
+    Collate dense documents/labels and returns
+
+    Arguments:
+    ---------
+    x: iterator
+        iterator over np.ndarray that needs to be converted to
+        tensors and padded
+    dtype: datatype, optional (default=torch.FloatTensor)
+        features should be of this type
+    """
+    return torch.stack(list(
+            map(lambda z: torch.from_numpy(z), x)), 0).type(dtype)
+
+
+def collate_sparse(x, pad_val=0.0, has_weight=False, dtype=torch.FloatTensor):
+    """
+    Collate sparse documents
+    * Can handle with or without weights
+    * Expects an iterator over tuples if has_weight=True
+
+    Arguments:
+    ---------
+    x: iterator
+        iterator over data points which can be
+        np.array or tuple of np.ndarray depending on has_weight
+    pad_val: list or float, optional, default=(0.0)
+        padding value for indices and weights
+        * expects a list when has_weight=True
+    has_weight: bool, optional, default=False
+        If entries have weights
+        * True: objects are tuples of np.ndarrays
+            0: indices, 1: weights
+        * False: objects are np.ndarrays
+    dtypes: list or dtype, optional (default=torch.FloatTensor)
+        dtypes of indices and values
+        * expects a list when has_weight=True
+    """
+    weights = None
+    if has_weight:
+        x = list(x)
+        indices = pad_and_collate(map(lambda z: z[0], x), pad_val[0], dtype[0])
+        weights = pad_and_collate(map(lambda z: z[1], x), pad_val[1], dtype[1])
+    else:
+        indices = pad_and_collate(x, pad_val, dtype)
+    return indices, weights
+
+
+def get_iterator(x, ind):
+    return map(lambda z: z[ind], x)
 
 
 def construct_collate_fn(feature_type, use_shortlist=False):
@@ -33,25 +108,22 @@ def collate_fn_sparse_sl(batch):
         For sparse features
     """
     batch_data = {}
-    batch_size = len(batch)
-    seq_lengths = [len(item[0][0]) for item in batch]
-    batch_data['X'] = torch.zeros(batch_size, max(seq_lengths)).long()
-    batch_data['X_w'] = torch.zeros(batch_size, max(seq_lengths))
-    sequences = [item[0] for item in batch]
-    for idx, (seq, seqlen) in enumerate(zip(sequences, seq_lengths)):
-        batch_data['X'][idx, :seqlen] = torch.LongTensor(seq[0])
-        batch_data['X_w'][idx, :seqlen] = torch.FloatTensor(seq[1])
-    shortlist_size = len(batch[0][1][0])
-    batch_data['Y_s'] = torch.zeros(batch_size, shortlist_size).long()
-    batch_data['Y'] = torch.zeros(batch_size, shortlist_size)
-    batch_data['Y_d'] = torch.zeros(batch_size, shortlist_size)
-    sequences = [item[1] for item in batch]
-    for idx, seq in enumerate(sequences):
-        batch_data['Y_s'][idx, :] = torch.LongTensor(seq[0])
-        batch_data['Y'][idx, :] = torch.FloatTensor(seq[1])
-        batch_data['Y_d'][idx, :] = torch.FloatTensor(seq[2])
-    batch_data['batch_size'] = batch_size
+    batch_data['batch_size'] = len(batch)
+    batch_data['X'], batch_data['X_w'] = collate_sparse(
+        get_iterator(batch, 0), pad_val=[0, 0.0], has_weight=True,
+        dtype=[torch.LongTensor, torch.FloatTensor])
+
+    z = list(get_iterator(batch, 1))
+    batch_data['Y_s'] = collate_dense(
+        get_iterator(z, 0), dtype=torch.LongTensor)
+    batch_data['Y'] = collate_dense(
+        get_iterator(z, 1), dtype=torch.FloatTensor)
+    batch_data['Y_sim'] = collate_dense(
+        get_iterator(z, 2), dtype=torch.FloatTensor)
+    batch_data['Y_mask'] = collate_dense(
+        get_iterator(z, 3), dtype=torch.BoolTensor)
     return batch_data
+
 
 def collate_fn_dense_sl(batch):
     """
@@ -59,23 +131,18 @@ def collate_fn_dense_sl(batch):
         For dense features
     """
     batch_data = {}
-    batch_size = len(batch)
-    emb_dims = batch[0][0].size
-    batch_data['X'] = np.zeros((batch_size, emb_dims))
-    for idx, _batch in enumerate(batch):
-        batch_data['X'][idx, :] = _batch[0]
-    batch_data['X'] = torch.from_numpy(batch_data['X']).type(torch.FloatTensor)
+    batch_data['batch_size'] = len(batch)
+    batch_data['X'] = collate_dense(get_iterator(batch, 0))
 
-    shortlist_size = len(batch[0][1][0])
-    batch_data['Y_s'] = torch.zeros(batch_size, shortlist_size).long()
-    batch_data['Y'] = torch.zeros(batch_size, shortlist_size)
-    batch_data['Y_d'] = torch.zeros(batch_size, shortlist_size)
-    sequences = [item[1] for item in batch]
-    for idx, seq in enumerate(sequences):
-        batch_data['Y_s'][idx, :] = torch.LongTensor(seq[0])
-        batch_data['Y'][idx, :] = torch.FloatTensor(seq[1])
-        batch_data['Y_d'][idx, :] = torch.FloatTensor(seq[2])
-    batch_data['batch_size'] = batch_size
+    z = list(get_iterator(batch, 1))
+    batch_data['Y_s'] = collate_dense(
+        get_iterator(z, 0), dtype=torch.LongTensor)
+    batch_data['Y'] = collate_dense(
+        get_iterator(z, 1), dtype=torch.FloatTensor)
+    batch_data['Y_sim'] = collate_dense(
+        get_iterator(z, 2), dtype=torch.FloatTensor)
+    batch_data['Y_mask'] = collate_dense(
+        get_iterator(z, 3), dtype=torch.BoolTensor)
     return batch_data
 
 
@@ -85,14 +152,9 @@ def collate_fn_dense_full(batch):
         For dense features
     """
     batch_data = {}
-    batch_size = len(batch)
-    emb_dims = batch[0][0].size
-    batch_data['X'] = np.zeros((batch_size, emb_dims))
-    for idx, _batch in enumerate(batch):
-        batch_data['X'][idx, :] = _batch[0]
-    batch_data['X'] = torch.from_numpy(batch_data['X']).type(torch.FloatTensor)
-    batch_data['Y'] = torch.stack([torch.from_numpy(x[1]) for x in batch], 0)
-    batch_data['batch_size'] = batch_size
+    batch_data['batch_size'] = len(batch)
+    batch_data['X'] = collate_dense(get_iterator(batch, 0))
+    batch_data['Y'] = collate_dense(get_iterator(batch, 1))
     return batch_data
 
 
@@ -102,14 +164,9 @@ def collate_fn_sparse_full(batch):
         For sparse features
     """
     batch_data = {}
-    batch_size = len(batch)
-    seq_lengths = [len(item[0][0]) for item in batch]
-    batch_data['X'] = torch.zeros(batch_size, max(seq_lengths)).long()
-    batch_data['X_w'] = torch.zeros(batch_size, max(seq_lengths))
-    sequences = [item[0] for item in batch]
-    for idx, (seq, seqlen) in enumerate(zip(sequences, seq_lengths)):
-        batch_data['X'][idx, :seqlen] = torch.LongTensor(seq[0])
-        batch_data['X_w'][idx, :seqlen] = torch.FloatTensor(seq[1])
-    batch_data['Y'] = torch.stack([torch.from_numpy(x[1]) for x in batch], 0)
-    batch_data['batch_size'] = batch_size
+    batch_data['batch_size'] = len(batch)
+    batch_data['X'], batch_data['X_w'] = collate_sparse(
+        get_iterator(batch, 0), pad_val=[0, 0.0], has_weight=True,
+        dtype=[torch.LongTensor, torch.FloatTensor])
+    batch_data['Y'] = collate_dense(get_iterator(batch, 1))
     return batch_data

@@ -127,18 +127,19 @@ class DeepXMLBase(nn.Module):
         word_embeddings: numpy array
             existing embeddings
         """
-        self.embeddings.weight.data.copy_(torch.from_numpy(word_embeddings))
+        self.embeddings.from_pretrained(word_embeddings)
 
-    def initialize_classifier(self, clf_weights):
+    def initialize_classifier(self, weights, bias=None):
         """Initialize classifier from existing weights
         Parameters:
         -----------
-        clf_weights: numpy.ndarray
-            (num_labels, repr_dims+1) last dimension is bias
+        weights: numpy.ndarray
+            (num_labels, repr_dims) last dimension is bias
+        bias: numpy.ndarray
         """
-        self.classifier.weight.data.copy_(torch.from_numpy(clf_weights[:, -1]))
-        self.classifier.bias.data.copy_(
-            torch.from_numpy(clf_weights[:, -1]).view(-1, 1))
+        self.classifier.weight.data.copy_(torch.from_numpy(weights))
+        if bias is not None:
+            self.classifier.bias.data.copy_(torch.from_numpy(bias).view(-1, 1))
 
     def get_clf_weights(self):
         """Get classifier weights
@@ -152,12 +153,16 @@ class DeepXMLBase(nn.Module):
         self.transform.to()
         self.classifier.to()
 
+    def purge(self, fname):
+        if os.path.isfile(fname):
+            os.remove(fname)
+
     @property
     def num_trainable_params(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     @property
-    def model_size(self):
+    def model_size(self):  # Assumptions: 32bit floats
         return self.num_trainable_params * 4 / math.pow(2, 20)
 
 

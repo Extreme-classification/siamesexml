@@ -15,6 +15,7 @@ import libs.model as model_utils
 import libs.optimizer_utils as optimizer_utils
 import libs.parameters as parameters
 import libs.negative_sampling as negative_sampling
+import libs.loss as loss
 
 
 __author__ = 'KD'
@@ -321,6 +322,20 @@ def construct_model(params, net, criterion, optimizer, shorty):
     return model
 
 
+def construct_loss(params, pos_weight=None):
+    _reduction = 'sum' if params.use_shortlist else 'mean'
+    # pad index is for OVA training and not shortlist
+    # pass mask for shortlist
+    _pad_ind = None if params.use_shortlist else params.label_padding_index
+    if params.loss = 'bce':
+        return loss.BCEWithLogitsLoss(
+            reduction=_reduction, pad_ind=_pad_ind, pos_weight=pos_weight)
+    else:
+        return loss.CosineEmbeddingLoss(
+            reduction=_reduction, pad_ind=_pad_ind,
+            pos_weight=pos_weight, margin=params.margin)
+
+
 def main(params):
     """
         Main function
@@ -331,15 +346,12 @@ def main(params):
             params.label_padding_index = params.num_labels
         net = construct_network(params)
         word_embeddings, label_embeddings = load_emeddings(params)
-        net.initialize_embeddings(
-            utils.append_padding_embedding(word_embeddings))
-        #  net.initialize_classifier(label_embeddings)
-        net.initialize_classifier(
-           utils.append_padding_embedding(label_embeddings, -1))
-        del word_embeddings, label_embeddings
+        net.initialize_embeddings(word_embeddings)
+        # net.initialize_classifier(label_embeddings)
+        # del label_embeddings
+        del word_embeddings
         print("Initialized embeddings!")
-        criterion = torch.nn.BCEWithLogitsLoss(
-           reduction='sum' if params.use_shortlist else 'mean')
+        criterion = construct_loss(params)
         print("Model parameters: ", params)
         print("\nModel configuration: ", net)
         optimizer = optimizer_utils.Optimizer(
@@ -348,8 +360,7 @@ def main(params):
             momentum=params.momentum,
             freeze_embeddings=params.freeze_embeddings,
             weight_decay=params.weight_decay)
-        params.lrs = {"embeddings": params.learning_rate*1.0}
-        optimizer.construct(net, params)
+        optimizer.construct(net)
         shorty = construct_shortlist(params)
         model = construct_model(params, net, criterion, optimizer, shorty)
         model.transfer_to_devices()
@@ -361,28 +372,23 @@ def main(params):
         fname = os.path.join(params.result_dir, 'params.json')
         utils.load_parameters(fname, params)
         net = construct_network(params)
+        criterion = construct_loss(params)
+        print("Model parameters: ", params)
+        print("\nModel configuration: ", net)
         optimizer = optimizer_utils.Optimizer(
             opt_type=params.optim,
             learning_rate=params.learning_rate,
             momentum=params.momentum,
-            freeze_embeddings=params.freeze_embeddings)
-        criterion = torch.nn.BCEWithLogitsLoss(
-            size_average=False if params.use_shortlist else True)
+            freeze_embeddings=params.freeze_embeddings,
+            weight_decay=params.weight_decay)
         shorty = construct_shortlist(params)
         model = construct_model(params, net, criterion, optimizer, shorty)
 
         model.load_checkpoint(
             params.model_dir, params.model_fname, params.last_epoch)
         model.transfer_to_devices()
-
-        model.optimizer = optimizer
-        model.optimizer.construct(model.net)
-
-        # fname = os.path.join(
-        #   params.model_dir, 'checkpoint_net_{}.pkl'.format(
-        #   params.last_epoch))
-        # checkpoint = torch.load(open(fname, 'rb'))
-        # model.optimizer.load_state_dict(checkpoint['optimizer'])
+        optimizer = optimizer
+        optimizer.construct(net)
         print("Model configuration is: ", params)
         train(model, params)
 

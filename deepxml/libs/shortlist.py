@@ -1,14 +1,14 @@
-import logging
 import numpy as np
-import multiprocessing as mp
-import libs.ANN as ANN
 import _pickle as pickle
 import operator
 from scipy.sparse import csr_matrix, diags
 from .lookup import Table
-from xclib.utils.sparse import topk
+import xclib.utils.ann as ANN
+from xclib.utils.dense import compute_centroid
+from xclib.utils.sparse import topk, csr_from_arrays
 import os
 import numba
+import math
 from operator import itemgetter
 from libs.clustering import Cluster
 
@@ -77,17 +77,56 @@ class Shortlist(object):
         del self.index
         self._construct()
 
+    @property
+    def model_size(self):
+        # size on disk; see if there is a better solution
+        import tempfile
+        with tempfile.NamedTemporaryFile() as tmp:
+            self.index.save(tmp.name)
+            _size = os.path.getsize(tmp.name)/math.pow(2, 20)
+        return _size
+
 
 class ShortlistCentroids(Shortlist):
-    def __init__(self, method, num_neighbours, M, efC, efS,
-                 num_threads=24, space='cosine', verbose=False,
-                 num_clusters=1):
+    """Get nearest labels using KCentroids
+    * centroid(l) = mean_{i=1}^{N}{x_i*y_il}
+    * brute or HNSW algorithm for search
+    Parameters
+    ----------
+    method: str, optional, default='hnsw'
+        brute or hnsw
+    num_neighbours: int
+        number of neighbors (same as efS)
+        * may be useful if the NN search retrieve less number of labels
+        * typically doesn't happen with HNSW etc.
+    M: int, optional, default=100
+        HNSW M (Usually 100)
+    efC: int, optional, default=300
+        construction parameter (Usually 300)
+    efS: int, optional, default=300
+        search parameter (Usually 300)
+    num_threads: int, optional, default=18
+        use multiple threads to cluster
+    space: str, optional, default='cosine'
+        metric to use while quering
+    verbose: boolean, optional, default=True
+        print progress
+    num_clusters: int, optional, default=1
+        cluster instances => multiple representatives for chosen labels
+    threshold: int, optional, default=5000
+        cluster instances if a label appear in more than 'threshold'
+        training points
+    """
+    def __init__(self, method='hnsw', num_neighbours=300, M=100, efC=300,
+                 efS=300, num_threads=24, space='cosine', verbose=True,
+                 num_clusters=1, threshold=5000):
         super().__init__(method, num_neighbours, M, efC, efS, num_threads)
         self.num_clusters = num_clusters
         self.space = space
-        self.padding_index = -1
+        self.pad_ind = -1
         self.mapping = None
         self.ext_head = None
+        self.threshold = threshold
 
     def _cluster_multiple_rep(self, features, labels, label_centroids,
                               multi_centroid_indices):
@@ -102,16 +141,10 @@ class ShortlistCentroids(Shortlist):
             [label_centroids, _cluster_obj.predict()])
         return label_centroids
 
-    def _compute_centroid(self, features, labels):
-        label_centroids = labels.transpose().dot(features)
-        freq = np.ravel(np.sum(labels, axis=0)).reshape(-1, 1)
-        return label_centroids/freq
-
-    def process_multiple_rep(self, features, labels, label_centroids,
-                             threshold=7500):
+    def process_multiple_rep(self, features, labels, label_centroids):
         freq = np.array(labels.sum(axis=0)).ravel()
-        if np.max(freq) > threshold and self.num_clusters > 1:
-            self.ext_head = np.where(freq >= threshold)[0]
+        if np.max(freq) > self.threshold and self.num_clusters > 1:
+            self.ext_head = np.where(freq >= self.threshold)[0]
             print("Found {} super-head labels".format(len(self.ext_head)))
             self.mapping = np.arange(label_centroids.shape[0])
             for idx in self.ext_head:
@@ -123,8 +156,8 @@ class ShortlistCentroids(Shortlist):
             return label_centroids
 
     def fit(self, features, labels, *args, **kwargs):
-        self.padding_index = labels.shape[1]
-        label_centroids = self._compute_centroid(features, labels)
+        self.pad_ind = labels.shape[1]
+        label_centroids = compute_centroid(features, labels, reduction='mean')
         label_centroids = self.process_multiple_rep(
             features, labels, label_centroids)
         norms = np.sum(np.square(label_centroids), axis=1)
@@ -138,7 +171,7 @@ class ShortlistCentroids(Shortlist):
         if self.mapping is None:
             return indices, sims
         print("Re-mapping code not optimized")
-        mapped_indices = np.full_like(indices, self.padding_index)
+        mapped_indices = np.full_like(indices, self.pad_ind)
         # minimum similarity for padding index
         mapped_sims = np.full_like(sims, -1000.0)
         for idx, (ind, sim) in enumerate(zip(indices, sims)):
@@ -147,8 +180,7 @@ class ShortlistCentroids(Shortlist):
             mapped_sims[idx, :len(_sim)] = _sim
         return mapped_indices, mapped_sims
 
-    def _remap_one(self, indices, vals,
-                   _func=max, _limit=-1000):
+    def _remap_one(self, indices, vals, _func=max, _limit=-1000):
         """
             Remap multiple centroids to original labels
         """
@@ -162,91 +194,166 @@ class ShortlistCentroids(Shortlist):
 
     def load(self, fname):
         temp = pickle.load(open(fname+".metadata", 'rb'))
-        self.padding_index = temp['padding_index']
+        self.pad_ind = temp['pad_ind']
         self.mapping = temp['mapping']
         self.ext_head = temp['ext_head']
-        super().load(fname)
+        super().load(fname+".index")
 
     def save(self, fname):
         metadata = {
-            'padding_index': self.padding_index,
+            'pad_ind': self.pad_ind,
             'mapping': self.mapping,
             'ext_head': self.ext_head
         }
         pickle.dump(metadata, open(fname+".metadata", 'wb'))
-        super().save(fname)
+        super().save(fname+".index")
+
+    def purge(self, fname):
+        # purge files from disk
+        if os.path.isfile(fname+".index"):
+            os.remove(fname+".index")
+        if os.path.isfile(fname+".metadata"):
+            os.remove(fname+".metadata")
+
+
+class ShortlistEmbeddings(Shortlist):
+    """Get nearest labels using their embeddings
+    * brute or HNSW algorithm for search
+    Parameters
+    ----------
+    method: str, optional, default='hnsw'
+        brute or hnsw
+    num_neighbours: int
+        number of neighbors (same as efS)
+        * may be useful if the NN search retrieve less number of labels
+        * typically doesn't happen with HNSW etc.
+    M: int, optional, default=100
+        HNSW M (Usually 100)
+    efC: int, optional, default=300
+        construction parameter (Usually 300)
+    efS: int, optional, default=300
+        search parameter (Usually 300)
+    num_threads: int, optional, default=18
+        use multiple threads to cluster
+    space: str, optional, default='cosine'
+        metric to use while quering
+    verbose: boolean, optional, default=True
+        print progress
+    """
+    def __init__(self, method='hnsw', num_neighbours=300, M=100, efC=300,
+                 efS=300, space='cosine', verbose=True, num_threads=24):
+        super().__init__(method, num_neighbours, M, efC, efS, num_threads)
+
+    def purge(self, fname):
+        # purge files from disk
+        if os.path.isfile(fname+".index"):
+            os.remove(fname+".index")
 
 
 class ShortlistEnsemble(object):
-    def __init__(self, method, num_neighbours, M, efC, efS,
-                 num_threads=12, space='cosine', verbose=False,
-                 num_clusters=1):
-        self.index_kcentroid = ShortlistCentroids(
-            method, num_neighbours, M, efC, efS,
-            num_threads, space, verbose, num_clusters)
-        self.index_knn = Shortlist(
-            method, num_neighbours, M, efC, efS, num_threads)
+    """Get nearest labels using label embeddings and label centroids
+    * Give less weight to KNN (typically 0.1 or 0.075)
+    * brute or HNSW algorithm for search
+    Parameters
+    ----------
+    method: str, optional, default='hnsw'
+        brute or hnsw
+    num_neighbours: int, optional, default=500
+        number of labels to keep for each instance
+        * will pad using pad_ind and pad_val in case labels
+          are less than num_neighbours
+    M: int, optional, default=100
+        HNSW M (Usually 100)
+    efC: dict, optional, default={'kcentroid': 300, 'knn': 50}
+        construction parameter for kcentroid and knn
+        * Usually 300 for kcentroid and 50 for knn
+    efS: dict, optional, default={'kcentroid': 300, 'knn': 500}
+        search parameter for kcentroid and knn
+        * Usually 300 for kcentroid and 500 for knn
+    num_threads: int, optional, default=24
+        use multiple threads to cluster
+    space: str, optional, default='cosine'
+        metric to use while quering
+    verbose: boolean, optional, default=True
+        print progress
+    num_clusters: int, optional, default=1
+        cluster instances => multiple representatives for chosen labels
+    pad_val: int, optional, default=-10000
+        value for padding indices
+        - Useful as documents may have different number of nearest labels
+    gamma: float, optional, default=0.075
+        weight for embedding shortlist.
+        * final shortlist => gamma * kembed + (1-gamma) * kcentroid
+    """
+    def __init__(self, method='hnsw', num_neighbours=500,
+                 M={'kcentroid': 100, 'kembed': 100},
+                 efC={'kcentroid': 300, 'kembed': 300},
+                 efS={'kcentroid': 300, 'kembed': 300},
+                 num_threads=24, space='cosine', verbose=True,
+                 num_clusters=1, pad_val=-10000, gamma=0.075):
+        self.kcentroid = ShortlistCentroids(
+            method=method, num_neighbours=efS['kcentroid'],
+            M=M['kcentroid'], efC=efC['kcentroid'], efS=efS['kcentroid'],
+            num_threads=num_threads, space=space, verbose=True)
+        self.kembed = ShortlistEmbeddings(
+            method=method, num_neighbours=efS['kembed'], M=M['kembed'],
+            efC=efC['kembed'], efS=efS['kembed'], num_threads=num_threads,
+            space=space, verbose=True)
         self.num_labels = None
+        self.num_neighbours = num_neighbours
+        self.pad_val = pad_val
+        self.pad_ind = -1
+        self.gamma = gamma
 
-    def fit(self, label_features, features, labels, *args, **kwargs):
-        assert labels.shape[1] == label_features.shape[0], \
-            "#label should match in knn and kcentroid"
-        self.index_kcentroid.fit(features, labels)
-        self.index_knn.fit(label_features)
-        self.num_labels = label_features.shape[0]
-
-    def _to_csr(self, ind, sim, _shape):
-        """
-            Convert dense data to a csr_matrix
-        """
-        rows = []
-        data = []
-        cols = []
-        for idx, (_ind, _sim) in enumerate(zip(ind, sim)):
-            cols.extend(_ind)
-            data.extend(_sim)
-            rows.extend([idx]*len(_ind))
-        return csr_matrix((np.array(data), (rows, cols)), shape=_shape)
-
-    def _normalize(self, X):
-        _max = X.max(axis=1).toarray().ravel()
-        _max[_max == 0] = 1.0
-        _norm = diags(1.0/_max)
-        return _norm.dot(X).tocsr()
+    def fit(self, X, Y, Yf, *args, **kwargs):
+        assert Y.shape[1] == Yf.shape[0], \
+            "#label should match in kembed and kcentroid"
+        self.pad_ind = Y.shape[1]
+        self.num_labels = Y.shape[1]
+        self.index_kcentroid.fit(X, Y)
+        self.index_kembed.fit(Yf)
 
     def merge(self, indices_kcentroid, sim_kcentroid,
-              indices_knn, sim_knn, gamma=0.1):
+              indices_kembed, sim_kembed):
         _shape = (len(indices_kcentroid), self.num_labels)
-        _kcentroid = self._to_csr(indices_kcentroid, sim_kcentroid, _shape)
-        _knn = self._to_csr(indices_knn, sim_knn, _shape)
-        temp = (gamma*self._normalize(_knn) +
-                (1-gamma)*self._normalize(_kcentroid)).tolil()
+        _kcentroid = csr_from_arrays(indices_kcentroid, sim_kcentroid, _shape)
+        _kembed = csr_from_arrays(indices_kembed, sim_embed, _shape)
+        temp = (gamma*_kembed + (1-gamma)*_kcentroid).tolil()
         indices = [np.array(item, dtype=np.int64) for item in temp.rows]
         sim = [np.array(item, dtype=np.float32) for item in temp.data]
         return indices, sim
 
-    def query(self, data, *args, **kwargs):
-        indices_kcentroid, sim_kcentroid = self.index_kcentroid.query(data, *args, **kwargs)
-        # return indices_kcentroid, sim_kcentroid
-        indices_knn, sim_knn = self.index_knn.query(data, *args, **kwargs)
+    def query(self, data):
+        indices_kcentroid, sim_kcentroid = self.index_kcentroid.query(data)
+        indices_kembed, sim_kembed = self.index_kembed.query(data)
         indices, sim = self.merge(
-            indices_kcentroid, sim_kcentroid, indices_knn, sim_knn)
+            indices_kcentroid, sim_kcentroid, indices_kembed, sim_kembed)
         return indices, sim
 
     def save(self, fname):
-        metadata = {
-            'num_labels': self.num_labels
-        }
-        pickle.dump(metadata, open(fname+".metadata", 'wb'))
-        self.index_knn.save(fname+".knn")
-        self.index_kcentroid.save(fname+".kcentroid")
+        # Returns the filename on disk; useful in purging checkpoints
+        pickle.dump(
+            {'num_labels': self.num_labels,
+             'pad_ind': self.pad_ind,
+             'gamma': self.gamma},
+            open(fname+".metadata", 'wb'))
+        self.kcentroid.save(fname+'.kcentroid')
+        self.kembed.save(fname+'.kembed')
+
+    def purge(self, fname):
+        # purge files from disk
+        self.kembed.purge(fname)
+        self.kcentroid.purge(fname)
 
     def load(self, fname):
-        temp = pickle.load(open(fname+".metadata", 'rb'))
-        self.num_labels = temp['num_labels']
-        self.index_knn.load(fname+".knn")
-        self.index_kcentroid.load(fname+".kcentroid")
+        obj = pickle.load(
+            open(fname+".metadata", 'rb'))
+        self.num_labels = obj['num_labels']
+        self.pad_ind = obj['pad_ind']
+        self.gamma = obj['gamma']
+        self.kcentroid.load(fname+'.kcentroid')
+        self.kembed.load(fname+'.kembed')
 
     def reset(self):
-        self.index_knn.reset()
-        self.index_kcentroid.reset()
+        self.kcentroid.reset()
+        self.kembed.reset()

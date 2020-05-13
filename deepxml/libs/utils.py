@@ -179,11 +179,3 @@ def update_predicted(start_idx, batch_size, predicted_batch_labels,
     ind[:, 1] = top_indices.cpu().numpy().flatten('C')
     vals = top_values.cpu().numpy().flatten('C')
     predicted_labels[ind[:, 0], ind[:, 1]] = vals
-
-
-def add_noise(X, epsilon=0.1):
-    """Noise sampled from half gaussian distribution with zero mean
-    """
-    noise = np.random.normal(scale=epsilon, size=X.shape)
-    noise[noise < 0] = -noise[noise < 0]
-    return X + noise
