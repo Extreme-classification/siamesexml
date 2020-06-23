@@ -13,6 +13,7 @@ train () {
 }
 
 retrain () {
+        # TODO
         # $1 dataset
         # $2 data_dir
         # $3 model_dir
@@ -80,68 +81,11 @@ evaluate () {
         # $2 train
         # $3 test
         # $4 pred_fname path
-        # $5 filter map
-        # $6 A
-        # $7 B
-        # $8 BETAS
-        log_eval_file="${1}/log_eval.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/tools/evaluate.py "${2}" "${3}" "${4}" "$5" $6 $7 $8 | tee -a $log_eval_file
-}
-
-post_process(){
-    # $1 data directory
-    # $2 embedding files
-    # $3 file name
-    # $4 result directory
-    data_dir=$1
-    wrd_emb=$2
-    file=$3
-    result_dir=$4
-    python -u ${work_dir}/programs/deepxmlpp/deepxml/tools/gen_dense_dataset.py "${data_dir}/${file}.txt" "${wrd_emb}" "${result_dir}/${file}.txt"
-    wait
-}
-
-gen_tail_emb ()
-{
-    # $1 data directory
-    # $2 result directory
-    # $3 version
-    # $4 embedding_dims
-
-    data_dir=$1
-    result_dir=$2
-    model_dir="$(dirname "$3")"
-    version=$4
-    embedding_dims=$5
-    temp_dir=$6
-    
-    original_emb="${data_dir}/fasttextB_embeddings_${embedding_dims}d.npy"
-    gen_emb=$result_dir
-    feat_idx="${data_dir}/${temp_dir}/features_split_${version}.txt"
-    out_emb="${model_dir}/head_embeddings_${embedding_dims}d.npy"
-    python ${work_dir}/programs/deepxml/deepxml/tools/init_embedding_from_head.py $original_emb $gen_emb $feat_idx $out_emb
-}
-
-gen_lbl_emb ()
-{
-    # $1 model directory
-    # $2 file name
-    model_dir="$(dirname "$1")"
-    fname=$2
-    cp ${fname} ${model_dir}
-}
-
-
-print_mat () {
-        # $1 result_dir
-        # $2 train
-        # $3 test
-        # $4 pred_fname path
         # $5 A
         # $6 B
-        # $7 TYPE and BETAS
-        log_eval_file="${1}/log_print.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/tools/print_score_for_beta.py "${2}" "${3}" "${4}" $5 $6 $7 | tee -a $log_eval_file
+        # $7 SAVE and BETAS
+        log_eval_file="${1}/log_eval.txt"
+        python -u ${work_dir}/programs/deepxmlpp/deepxml/tools/evaluate.py "${2}" "${3}" "${4}" $5 $6 $7 | tee -a $log_eval_file
 }
 
 
@@ -167,63 +111,27 @@ if [ "${FLAG}" == "train" ]
 then
     # $1 PARAMS
     train $model_dir $result_dir "${1}"
-
 elif [ "${FLAG}" == "predict" ]
 then
     # #1 PARAMS
     predict $result_dir $model_dir "${1}"
-
 elif [ "${FLAG}" == "evaluate" ]
-then
-    # $1 Out_file
-    # $2 filter fname
-    # $3 A
-    # $4 B
-    # $5 BETAS
-    evaluate $result_dir $data_dir'/trn_X_Y.txt' $data_dir'/tst_X_Y.txt' "${result_dir}/${1}" ${2} ${3} ${4} "${5}"
-
-elif [ "${FLAG}" == "print_mat" ]
 then
     # $1 Out_file
     # $2 A
     # $3 B
-    # $4 TYPE and BETAS
-    echo "Printing Mat"
-    print_mat $result_dir $data_dir'/trn_X_Y.txt' $data_dir'/tst_X_Y.txt' "${result_dir}/${1}" ${2} ${3} "${4}"
-
+    # $4 TYPE, SAVE and BETAS
+    evaluate $result_dir "${data_dir}/trn_X_Y.txt" "${data_dir}/tst_X_Y.txt" "${result_dir}/${1}" ${2} ${3} "${4}"
 elif [ "${FLAG}" == "extract" ]
 then
     # $1 PARAMS
     mkdir -p "${result_dir}/export"
     extract $result_dir $model_dir "${1}"
-
-
-elif [ "${FLAG}" == "postprocess" ]
-then
-    # $1 embedding files
-    # $2 file 
-    post_process $data_dir "${result_dir}/${1}" "${2}" $result_dir/export
-
-
 elif [ "${FLAG}" == "retrain_w_shortlist" ]
 then
     # $1 embedding files
     # $2 file 
     retrain_w_shorty $model_dir $result_dir "${1}"
-
-
-elif [ "${FLAG}" == "gen_tail_emb" ]
-then
-    # $1 embedding files
-    # $2 file 
-    gen_tail_emb $data_dir $result_dir/$1 $model_dir $2 $3 $4
-
-elif [ "${FLAG}" == "gen_lbl_emb" ]
-then
-    # $1 embedding files
-    gen_lbl_emb $model_dir $result_dir/$1
 else
-
     echo "Kuch bhi"
-
 fi

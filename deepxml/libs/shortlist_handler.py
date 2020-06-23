@@ -8,23 +8,19 @@ from scipy.sparse import load_npz
 from xclib.utils import sparse as sp
 
 
-def construct_handler(shortlist_method, num_labels, shortlist=None,
+def construct_handler(shortlist_type, num_labels, shortlist=None,
                       model_dir='', mode='train', size_shortlist=-1,
                       label_mapping=None, in_memory=True,
                       shorty=None, corruption=200):
-    if shortlist_method == 'static':
+    if shortlist_type == 'static':
         return ShortlistHandlerStatic(
             num_labels, model_dir, mode, size_shortlist,
             in_memory, label_mapping)
-    elif shortlist_method == 'extended':
-        return ShortlistHandlerExtended(
-            num_labels, model_dir, mode, size_shortlist,
-            in_memory, label_mapping, corruption)
-    elif shortlist_method == 'hybrid':
+    elif shortlist_type == 'hybrid':
         return ShortlistHandlerHybrid(
             num_labels, model_dir, mode, size_shortlist,
             in_memory, label_mapping, corruption)
-    elif shortlist_method == 'dynamic':
+    elif shortlist_type == 'dynamic':
         return ShortlistHandlerDynamic(
             num_labels, shorty, model_dir, mode, size_shortlist,
             label_mapping)

@@ -21,9 +21,11 @@ import libs.loss as loss
 __author__ = 'KD'
 
 
-torch.manual_seed(22)
-torch.cuda.manual_seed_all(22)
-np.random.seed(22)
+def set_seed(value):
+    print("\nSetting the seed value: {}".format(value))
+    torch.manual_seed(value)
+    torch.cuda.manual_seed_all(value)
+    np.random.seed(value)
 
 
 def load_emeddings(params):
@@ -33,66 +35,30 @@ def load_emeddings(params):
         - loading head embeddings
     * vocabulary_dims must match #rows in embeddings
     """
-    if params.use_head_embeddings:
-        w_embeddings = np.load(
+    if params.use_aux_embeddings:
+        embeddings = np.load(
             os.path.join(os.path.dirname(params.model_dir),
                          params.embeddings))
-
     else:
         fname = os.path.join(
             params.data_dir, params.dataset, params.embeddings)
         if Path(fname).is_file():
-            print("Loading embeddings from file: {}".format(fname))
-            w_embeddings = np.load(fname)
+            embeddings = np.load(fname)
         else:
-            print("Loading random embeddings")
-            w_embeddings = np.random.rand(
+            print("Generating random embeddings")
+            embeddings = np.random.rand(
                 params.vocabulary_dims, params.embedding_dims)
-
-    #  load sparse label features; used to initialize classifier
-    from xclib.data import data_utils
-    lbl_features = data_utils.read_sparse_file(
-        os.path.join(params.data_dir, params.dataset, 'lbl_X_Xf.txt'))[:, :-1]
-    from sklearn.preprocessing import normalize
-    lbl_features = normalize(lbl_features)
-    l_embeddings = lbl_features @ w_embeddings  # dense features
-    import pickle
-    indices = pickle.load(
-        open(os.path.join(os.path.dirname(params.model_dir),
-        'labels_params.pkl'), 'rb'))['valid_labels']
-    l_embeddings = l_embeddings[indices]  # keep valid labels only
-    #  l_embeddings = None
     if params.feature_indices is not None:
         indices = np.genfromtxt(params.feature_indices, dtype=np.int32)
-        w_embeddings = w_embeddings[indices, :]
+        embeddings = embeddings[indices, :]
         del indices
-    assert params.vocabulary_dims == w_embeddings.shape[0]
-    return w_embeddings, l_embeddings
-
-
-def pp_with_shorty(model, params, shorty):
-    """Post-process with shortlist
-    Train a shortlist for a already trained model (typically from OVA) 
-    """
-    model._pp_with_shortlist(
-        model_dir=params.model_dir,
-        model_fname=params.model_fname,
-        shorty=shorty,
-        data_dir=params.data_dir,
-        dataset=params.dataset,
-        tr_feat_fname=params.tr_feat_fname,
-        tr_label_fname=params.tr_label_fname,
-        keep_invalid=False,
-        normalize_features=params.normalize,
-        normalize_labels=params.nbn_rel,
-        batch_size=params.batch_size,
-        num_workers=params.num_workers,
-        label_indices=params.label_indices,
-        feature_indices=params.feature_indices)
+    assert params.vocabulary_dims == embeddings.shape[0]
+    return embeddings
 
 
 def train(model, params):
     """Train the model with given data
+
     Parameters
     ----------
     model: DeepXML
@@ -108,9 +74,9 @@ def train(model, params):
         data={'X': None, 'Y': None, 'Yf': None},
         learning_rate=params.learning_rate,
         num_epochs=params.num_epochs,
-        tr_feat_fname=params.tr_feat_fname,
+        trn_feat_fname=params.tr_feat_fname,
         val_feat_fname=params.val_feat_fname,
-        tr_label_fname=params.tr_label_fname,
+        trn_label_fname=params.tr_label_fname,
         val_label_fname=params.val_label_fname,
         batch_size=params.batch_size,
         lbl_feat_fname=params.lbl_feat_fname,
@@ -122,11 +88,12 @@ def train(model, params):
         beta=params.beta,
         init_epoch=params.last_epoch,
         keep_invalid=params.keep_invalid,
-        shortlist_method=params.shortlist_method,
+        shortlist_type=params.shortlist_type,
         validate_after=params.validate_after,
         feature_indices=params.feature_indices,
         use_coarse=params.use_coarse_for_shorty,
-        label_indices=params.label_indices)
+        label_indices=params.label_indices,
+        sampling_type=params.sampling_type)
     model.save(params.model_dir, params.model_fname)
 
 
@@ -224,8 +191,8 @@ def inference(model, params):
     predicted_labels = model.predict(
         data_dir=params.data_dir,
         dataset=params.dataset,
-        ts_label_fname=params.ts_label_fname,
-        ts_feat_fname=params.ts_feat_fname,
+        tst_label_fname=params.ts_label_fname,
+        tst_feat_fname=params.ts_feat_fname,
         lbl_feat_fname=params.lbl_feat_fname,
         normalize_features=params.normalize,
         normalize_labels=params.nbn_rel,
@@ -264,9 +231,9 @@ def construct_network(params):
     """Construct DeepXML network
     """
     if params.use_shortlist:
-        return network.DeepXMLt(params)
+        return network.DeepXMLs(params)
     else:
-        return network.DeepXMLh(params)
+        return network.DeepXMLf(params)
 
 
 def construct_shortlist(params):
@@ -276,27 +243,33 @@ def construct_shortlist(params):
         - hnsw
         - parallel shortlist
     """
-    if params.shortlist_method == 'reranker':
-        return None
 
     if not params.use_shortlist:
         return None
 
-    if params.ns_method == 'ns':  # Negative Sampling
-        if params.num_clf_partitions > 1:
-            raise NotImplementedError("Not tested yet!")
-        else:
-            shorty = negative_sampling.NegativeSampler(
-                params.num_labels, params.num_nbrs, None, False)
-    elif params.ns_method == 'kcentroid':
+    if params.shortlist_method == 'random':  # Negative Sampling
+        shorty = negative_sampling.NegativeSampler(
+            num_labels=params.num_labels,
+            num_negatives=params.num_nbrs,
+            prob=None,
+            replace=False)
+    elif params.shortlist_method == 'centroids':
         shorty = shortlist.ShortlistCentroids(
-            params.ann_method, params.num_nbrs, params.M,
-            params.efC, params.efS, params.ann_threads,
+            method=params.ann_method,
+            num_neighbours=params.num_nbrs,
+            M=params.M,
+            efC=params.efC,
+            efS=params.efS,
+            num_threads=params.ann_threads,
             num_clusters=params.num_centroids)
-    elif params.ns_method == 'ensemble':
-        shorty = shortlist.ShortlistEnsemble(
-            params.ann_method, params.num_nbrs, params.M,
-            params.efC, params.efS, params.ann_threads)
+    elif params.shortlist_method == 'mips':
+        shorty = shortlist.ShortlistMIPS(
+            method=params.ann_method,
+            num_neighbours=params.num_nbrs,
+            M=params.M,
+            efC=params.efC,
+            efS=params.efS,
+            num_threads=params.ann_threads)
     else:
         raise NotImplementedError("Not yet implemented!")
     return shorty
@@ -317,6 +290,8 @@ def construct_model(params, net, criterion, optimizer, shorty):
             params, net, criterion, optimizer, shorty)
     elif params.model_method == 'full':
         model = model_utils.ModelFull(params, net, criterion, optimizer)
+    elif params.model_method == 'embedding':
+        model = model_utils.ModelEmbedding(params, net, criterion, optimizer)
     else:
         raise NotImplementedError("Unknown model_method.")
     return model
@@ -327,7 +302,7 @@ def construct_loss(params, pos_weight=None):
     # pad index is for OVA training and not shortlist
     # pass mask for shortlist
     _pad_ind = None if params.use_shortlist else params.label_padding_index
-    if params.loss = 'bce':
+    if params.loss == 'bce':
         return loss.BCEWithLogitsLoss(
             reduction=_reduction, pad_ind=_pad_ind, pos_weight=pos_weight)
     else:
@@ -345,10 +320,8 @@ def main(params):
         if params.use_shortlist:
             params.label_padding_index = params.num_labels
         net = construct_network(params)
-        word_embeddings, label_embeddings = load_emeddings(params)
+        word_embeddings = load_emeddings(params)
         net.initialize_embeddings(word_embeddings)
-        # net.initialize_classifier(label_embeddings)
-        # del label_embeddings
         del word_embeddings
         print("Initialized embeddings!")
         criterion = construct_loss(params)

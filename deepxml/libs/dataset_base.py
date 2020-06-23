@@ -7,7 +7,6 @@ import numpy as np
 from sklearn.preprocessing import normalize
 import xclib.data.data_utils as data_utils
 import operator
-from .lookup import Table, PartitionedTable
 from .features import construct as construct_f
 from .labels import construct as construct_l
 
@@ -60,8 +59,6 @@ class DatasetBase(torch.utils.data.Dataset):
             data_dir, fname_features, fname_labels, data,
             normalize_features, normalize_lables,
             feature_type, label_type)
-        self._split = None
-        self.index_select(feature_indices, label_indices)
         self.model_dir = model_dir
         self.data_dir = data_dir
         self.label_padding_index = self.num_labels
@@ -80,17 +77,10 @@ class DatasetBase(torch.utils.data.Dataset):
         """Transform feature and label matrix to specified
         features/labels only
         """
-        def _get_split_id(fname):
-            """Split ID (or quantile) from file name
-            """
-            idx = fname.split("_")[-1].split(".")[0]
-            return idx
         if label_indices is not None:
-            self._split = _get_split_id(label_indices)
             label_indices = np.loadtxt(label_indices, dtype=np.int32)
             self.labels.index_select(label_indices, axis=1)
         if feature_indices is not None:
-            self._split = _get_split_id(feature_indices)
             feature_indices = np.loadtxt(feature_indices, dtype=np.int32)
             self.features.index_select(feature_indices, axis=1)
 
@@ -161,13 +151,13 @@ class DatasetBase(torch.utils.data.Dataset):
         valid_labels = data_obj['valid_labels']
         self.labels.index_select(valid_labels)
 
-    def _process_labels(self, model_dir):
+    def _process_labels(self, model_dir, _split=None):
         """Process labels to handle labels without any training instance;
         """
         data_obj = {}
         fname = os.path.join(
-            model_dir, 'labels_params.pkl' if self._split is None else
-            "labels_params_split_{}.pkl".format(self._split))
+            model_dir, 'labels_params.pkl' if _split is None else
+            "labels_params_split_{}.pkl".format(_split))
         if self.mode == 'train':
             self._process_labels_train(data_obj)
             pickle.dump(data_obj, open(fname, 'wb'))

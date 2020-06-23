@@ -77,13 +77,13 @@ class CustomEmbedding(torch.nn.Module):
 
     def from_pretrained(self, embeddings):
         # first index is treated as padding index
-        if self.padding_index is not None:
+        if self.padding_idx is not None:
             self.weight.data[1:, :] = torch.from_numpy(embeddings)
         else:
             self.weight.data.copy_(torch.from_numpy(embeddings))
 
     def get_weights(self):
-        if self.padding_index is not None:
+        if self.padding_idx is not None:
             return self.weight.detach().cpu().numpy()[1:, :]
         else:
             return self.weight.detach().cpu().numpy()

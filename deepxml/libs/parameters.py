@@ -13,6 +13,27 @@ class Parameters(ParametersBase):
     def _construct(self):
         super()._construct()
         self.parser.add_argument(
+            '--lbl_feat_fname',
+            dest='lbl_feat_fname',
+            default='lbl_X_Xf.txt',
+            action='store',
+            type=str,
+            help='label feature file name')
+        self.parser.add_argument(
+            '--aux_mapping',
+            dest='aux_mapping',
+            default=None,
+            action='store',
+            type=str,
+            help='aux_mapping')
+        self.parser.add_argument(
+            '--seed',
+            dest='seed',
+            default=22,
+            action='store',
+            type=int,
+            help='seed values')
+        self.parser.add_argument(
             '--trans_method',
             dest='trans_method',
             default='non_linear',
@@ -48,26 +69,26 @@ class Parameters(ParametersBase):
             type=int,
             help='Start training from here')
         self.parser.add_argument(
-            '--shortlist_method',
-            dest='shortlist_method',
-            default='static',
-            action='store',
-            type=str,
-            help='Shortlist method (static/dynamic/hybrid)')
-        self.parser.add_argument(
             '--model_method',
             dest='model_method',
             default='full',
             action='store',
             type=str,
-            help='Model method (full/shortlist/ns)')
+            help='Model method (full/shortlist/embedding)')
         self.parser.add_argument(
-            '--ns_method',
-            dest='ns_method',
-            default='kcentroid',
+            '--shortlist_method',
+            dest='shortlist_method',
+            default='centroid',
             action='store',
             type=str,
             help='Sample negatives using this method')
+        self.parser.add_argument(
+            '--shortlist_type',
+            dest='shortlist_type',
+            default='dynamic',
+            action='store',
+            type=str,
+            help='static/dynamic/hybrid')
         self.parser.add_argument(
             '--ann_method',
             dest='ann_method',
@@ -97,12 +118,12 @@ class Parameters(ParametersBase):
             type=int,
             help='HSNW params')
         self.parser.add_argument(
-            '--num_clf_partitions',
-            dest='num_clf_partitions',
-            default=1,
+            '--loss',
+            dest='loss',
+            default='bce',
             action='store',
-            type=int,
-            help='#Partitioned classifier')
+            type=str,
+            help='Which loss to use')
         self.parser.add_argument(
             '--label_indices',
             dest='label_indices',
@@ -271,6 +292,13 @@ class Parameters(ParametersBase):
             action='store',
             help='eye or random')
         self.parser.add_argument(
+            '--sampling_type',
+            dest='sampling_type',
+            default='batch',
+            type=str,
+            action='store',
+            help='Which sampling method to use: point/batch')
+        self.parser.add_argument(
             '--label_padding_index',
             dest='label_padding_index',
             default=None,
@@ -326,9 +354,9 @@ class Parameters(ParametersBase):
             help='Update shortlist while predicting'
         )
         self.parser.add_argument(
-            '--use_head_embeddings',
+            '--use_aux_embeddings',
             action='store_true',
-            help='Use head embeddings?'
+            help='Use aux embeddings?'
         )
         self.parser.add_argument(
             '--huge_dataset',

@@ -12,25 +12,34 @@ from .lookup import Table
 from .shortlist_handler import construct_handler
 
 
-def construct_dataset(data_dir, fname_features, fname_labels, fname_lbl_features=None, 
-                      data=None, model_dir='', mode='train', size_shortlist=-1,
+def construct_dataset(_type, data_dir, fname_features, fname_labels,
+                      fname_label_features, data=None, model_dir='',
+                      mode='train', size_shortlist=-1,
                       normalize_features=True, normalize_labels=True,
-                      keep_invalid=False, num_centroids=1,
-                      feature_type='sparse', feature_indices=None,
-                      label_indices=None, shortlist_method='static',
+                      keep_invalid=False, feature_type='sparse',
+                      feature_indices=None, label_indices=None,
+                      label_feature_indices=None, shortlist_type='static',
                       shorty=None):
-    if size_shortlist == -1:
+    if _type == 'full':
         return DatasetDense(
-            data_dir, fname_features, fname_labels, fname_lbl_features, data,
-            model_dir, mode, feature_indices, label_indices, keep_invalid,
-            normalize_features, normalize_labels, feature_type)
-    else:
-        #  Construct dataset for sparse data
+            data_dir, fname_features, fname_labels, fname_label_features,
+            data, model_dir, mode, feature_indices, label_indices,
+            label_feature_indices, keep_invalid, normalize_features,
+            normalize_labels, feature_type)
+    elif _type == 'embedding':
+        return DatasetEmbedding(
+            data_dir, fname_features, fname_labels, fname_label_features,
+            data, model_dir, mode, feature_indices, label_indices,
+            label_feature_indices, keep_invalid, normalize_features,
+            normalize_labels, size_shortlist,
+            feature_type, shortlist_type, shorty)
+    elif _type == 'shortlist':
         return DatasetSparse(
-            data_dir, fname_features, fname_labels, fname_lbl_features, 
-            data, model_dir, mode, feature_indices, label_indices, keep_invalid,
-            normalize_features, normalize_labels, size_shortlist, num_centroids,
-            feature_type, shortlist_method, shorty)
+            data_dir, fname_features, fname_labels, fname_label_features,
+            data, model_dir, mode, feature_indices, label_indices,
+            label_feature_indices, keep_invalid, normalize_features,
+            normalize_labels, size_shortlist,
+            feature_type, shortlist_type, shorty)
 
 
 class DatasetDense(DatasetBase):
@@ -40,13 +49,15 @@ class DatasetDense(DatasetBase):
     data_dir: str
         data files are stored in this directory
     fname_features: str
-        feature file (libsvm or pickle)
+        feature file (libsvm/pickle/numpy)
     fname_labels: str
-        labels file (libsvm or pickle)    
+        labels file (libsvm/pickle/npz)    
+    fname_label_features: str
+        feature file for labels (libsvm/pickle/npy)
     data: dict, optional, default=None
         Read data directly from this obj rather than files
         Files are ignored if this is not None
-        Keys: 'X', 'Y'
+        Keys: 'X', 'Y', 'Yf'
     model_dir: str, optional, default=''
         Dump data like valid labels here
     mode: str, optional, default='train'
@@ -64,24 +75,23 @@ class DatasetDense(DatasetBase):
         Useful in-case on non-binary labels
     feature_type: str, optional, default='sparse'
         sparse or dense features
-    label_type: str, optional, default='dense'
-        sparse (i.e. with shortlist) or dense (OVA) labels
     """
 
-    def __init__(self, data_dir, fname_features, fname_labels, fname_lbl_features=None, 
-                 data=None, model_dir='', mode='train', feature_indices=None,
-                 label_indices=None, keep_invalid=False, normalize_features=True,
-                 normalize_labels=False, feature_type='sparse', label_type='dense'):
-        """
-            Expects 'libsvm' format with header
-            Args:
-                data_file: str: File name for the set
-            Can Support datasets w/o any label
-        """
+    def __init__(self, data_dir, fname_features, fname_labels,
+                 fname_label_features=None, data=None, model_dir='',
+                 mode='train', feature_indices=None, label_indices=None,
+                 label_feature_indices=None, keep_invalid=False,
+                 normalize_features=True, normalize_labels=False,
+                 feature_type='sparse'):
         super().__init__(data_dir, fname_features, fname_labels, data,
                          model_dir, mode, feature_indices, label_indices,
                          keep_invalid, normalize_features, normalize_labels,
-                         feature_type, label_type)
+                         feature_type, label_type='dense')
+        self.label_features = self.load_features(
+            data_dir, fname_label_features, data['Yf'],
+            normalize_features, feature_type)
+        self.index_select(
+            feature_indices, label_indices, label_feature_indices)
         if self.mode == 'train':
             # Remove samples w/o any feature or label
             self._remove_samples_wo_features_and_labels()
@@ -91,6 +101,38 @@ class DatasetDense(DatasetBase):
         self.feature_type = feature_type
         # TODO Take care of this select and padding index
         self.label_padding_index = self.num_labels
+
+    def index_select(self, feature_indices,
+                     label_indices, label_feature_indices=None):
+        """Transform feature and label matrix to specified
+        features/labels only
+        """
+        if label_feature_indices is None:
+            label_feature_indices = feature_indices
+        if label_indices is not None:
+            ind = np.loadtxt(label_indices, dtype=np.int64)
+            self.labels.index_select(ind, axis=1)
+            self.label_features.index_select(ind, axis=0)
+        if feature_indices is not None:
+            ind = np.loadtxt(feature_indices, dtype=np.int64)
+            self.features.index_select(ind, axis=1)
+        if label_feature_indices is not None:
+            ind = np.loadtxt(label_feature_indices, dtype=np.int64)
+            self.label_features.index_select(ind, axis=1)
+
+    def _process_labels_train(self, data_obj):
+        """Process labels for train data
+            - Remove labels without any training instance
+            - Remove labels without any features
+        """
+        data_obj['num_labels'] = self.num_labels
+        ind_0 = self.labels.get_valid()
+        ind_1 = self.label_features.get_valid()
+        valid_labels = np.intersect1d(ind_0, ind_1)
+        self._valid_labels = valid_labels
+        self.label_features.index_select(valid_labels, axis=0)
+        self.labels.index_select(valid_labels, axis=1)
+        data_obj['valid_labels'] = valid_labels
 
     def __getitem__(self, index):
         """
@@ -146,43 +188,38 @@ class DatasetSparse(DatasetBase):
         type of shortlist (static or dynamic)
     shorty: obj, optional, default=None
         Useful in-case of dynamic shortlist
-    label_type: str, optional, default='dense'
-        sparse (i.e. with shortlist) or dense (OVA) labels
     shortlist_in_memory: boolean, optional, default=True
         Keep shortlist in memory if True otherwise keep on disk
     """
 
-    def __init__(self, data_dir, fname_features, fname_labels, fname_lbl_features, 
-                 data=None, model_dir='', mode='train', feature_indices=None,
-                 label_indices=None, keep_invalid=False,
+    def __init__(self, data_dir, fname_features, fname_labels,
+                 fname_label_features, data=None, model_dir='',
+                 mode='train', feature_indices=None, label_indices=None,
+                 label_feature_indices=None, keep_invalid=False,
                  normalize_features=True, normalize_labels=False,
-                 size_shortlist=-1, num_centroids=1, feature_type='sparse',
-                 shortlist_method='static', shorty=None, label_type='sparse',
+                 size_shortlist=-1, feature_type='sparse',
+                 shortlist_method='static', shorty=None,
                  shortlist_in_memory=True, corruption=200):
-        """
-            Expects 'libsvm' format with header
-            Args:
-                data_file: str: File name for the set
-        """
         super().__init__(data_dir, fname_features, fname_labels, data,
                          model_dir, mode, feature_indices, label_indices,
                          keep_invalid, normalize_features, normalize_labels,
-                         feature_type, label_type)
+                         feature_type, label_type='sparse')
+        self.label_features = self.load_features(
+            data_dir, fname_label_features, data['Yf'],
+            normalize_features, feature_type)
+        self.index_select(
+            feature_indices, label_indices, label_feature_indices)
         if self.labels is None:
             NotImplementedError(
                 "No support for shortlist w/o any label, \
                     consider using dense dataset.")
         self.feature_type = feature_type
-        self.num_centroids = num_centroids
         self.shortlist_in_memory = shortlist_in_memory
-        # Load label features
-        # Assumption: fixed pre-supplied label features
-        self.lbl_features = self.load_label_features(fname_lbl_features, data, model_dir, label_indices)
         self.size_shortlist = size_shortlist
         self.shortlist_method = shortlist_method
         if self.mode == 'train':
             self._remove_samples_wo_features_and_labels()
-        
+
         if not keep_invalid:
             # Remove labels w/o any positive instance
             self._process_labels(model_dir)
@@ -200,19 +237,23 @@ class DatasetSparse(DatasetBase):
         self.use_shortlist = True if self.size_shortlist > 0 else False
         self.label_padding_index = self.num_labels
 
-    def load_label_features(self, fname, data, model_dir, label_indices):
-        lbl_features = None
-        if fname is not None or data['Yf'] is not None:
-            # label embeddings will be kept in model directory
-            lbl_features = self.load_features(
-                data_dir=os.path.dirname(model_dir), fname=fname,
-                X=data['Yf'], normalize_features=False,
-                feature_type='dense')
-            if label_indices is not None:
-                label_indices = np.loadtxt(label_indices, dtype=np.int32)
-                lbl_features.index_select(label_indices, axis=0)
-            print("Label embedding loaded.")
-        return lbl_features
+    def index_select(self, feature_indices,
+                     label_indices, label_feature_indices=None):
+        """Transform feature and label matrix to specified
+        features/labels only
+        """
+        if label_feature_indices is None:
+            label_feature_indices = feature_indices
+        if label_indices is not None:
+            ind = np.loadtxt(label_indices, dtype=np.int64)
+            self.labels.index_select(ind, axis=1)
+            self.label_features.index_select(ind, axis=0)
+        if feature_indices is not None:
+            ind = np.loadtxt(feature_indices, dtype=np.int64)
+            self.features.index_select(ind, axis=1)
+        if label_feature_indices is not None:
+            ind = np.loadtxt(label_feature_indices, dtype=np.int64)
+            self.label_features.index_select(ind, axis=1)
 
     def update_shortlist(self, shortlist, dist, fname='tmp', idx=-1):
         """Update label shortlist for each instance
@@ -232,46 +273,19 @@ class DatasetSparse(DatasetBase):
     def _process_labels_train(self, data_obj):
         """Process labels for train data
             - Remove labels without any training instance
+            - Remove labels without any features
         """
         data_obj['num_labels'] = self.num_labels
         ind_0 = self.labels.get_valid()
-        ind_1 = np.where(np.square(self.lbl_features.data).sum(axis=1))[0] #nnz vectors
+        ind_1 = self.label_features.get_valid()
         valid_labels = np.intersect1d(ind_0, ind_1)
         self._valid_labels = valid_labels
-        print("#Valid labels: {}".format(len(valid_labels)))
         self.lbl_features.index_select(valid_labels, axis=0)
         self.labels.index_select(valid_labels, axis=1)
         data_obj['valid_labels'] = valid_labels
 
-    def _process_labels_retrain_w_shortlist(self, data_obj):
-        """Process labels for retrain with shortlist
-        Useful for training labels shortlist after OVA training
-        """
-        super()._process_labels_predict(data_obj)
-
-    def _process_labels(self, model_dir):
-        """
-            Process labels to handle labels without any training instance;
-        """
-        data_obj = {}
-        fname = os.path.join(
-            model_dir, 'labels_params.pkl' if self._split is None else
-            "labels_params_split_{}.pkl".format(self._split))
-        if self.mode == 'train':
-            self._process_labels_train(data_obj)
-            pickle.dump(data_obj, open(fname, 'wb'))
-        elif self.mode == 'retrain_w_shortlist':
-            data_obj = pickle.load(open(fname, 'rb'))
-            self._process_labels_retrain_w_shortlist(
-                data_obj)
-            pickle.dump(data_obj, open(fname, 'wb'))
-        else:
-            data_obj = pickle.load(open(fname, 'rb'))
-            self._process_labels_predict(data_obj)
-
     def get_shortlist(self, index):
-        """
-            Get data with shortlist for given data index
+        """Get data with shortlist for given data index
         """
         pos_labels, _ = self.labels[index]
         return self.shortlist.get_shortlist(index, pos_labels)
@@ -295,3 +309,147 @@ class DatasetSparse(DatasetBase):
         x = self.features[index]
         y = self.get_shortlist(index)
         return x, y
+
+
+class DatasetEmbedding(DatasetBase):
+    """Dataset to load and use XML-Datasets for embedding based
+    methods, i.e., where label features are required while batching
+    Parameters
+    ---------
+    data_dir: str
+        data files are stored in this directory
+    fname_features: str
+        feature file (libsvm or pickle)
+    fname_labels: str
+        labels file (libsvm or pickle)    
+    fname_lbl_features: str
+        features for each label (libsvm or pickle)    
+    data: dict, optional, default=None
+        Read data directly from this obj rather than files
+        Files are ignored if this is not None
+        Keys: 'X', 'Y'
+    model_dir: str, optional, default=''
+        Dump data like valid labels here
+    mode: str, optional, default='train'
+        Mode of the dataset
+    feature_indices: np.ndarray or None, optional, default=None
+        Train with selected features only
+    label_indices: np.ndarray or None, optional, default=None
+        Train for selected labels only
+    keep_invalid: bool, optional, default=False
+        Don't touch data points or labels
+    normalize_features: bool, optional, default=True
+        Normalize data points to unit norm
+    normalize_lables: bool, optional, default=False
+        Normalize labels to convert in probabilities
+        Useful in-case on non-binary labels
+    feature_type: str, optional, default='sparse'
+        sparse or dense features
+    shortlist_method: str, optional, default='static'
+        type of shortlist (static or dynamic)
+    """
+
+    def __init__(self, data_dir, fname_features, fname_labels,
+                 fname_label_features, data=None, model_dir='',
+                 mode='train', feature_indices=None, label_indices=None,
+                 label_feature_indices=None, keep_invalid=False,
+                 normalize_features=True, normalize_labels=False,
+                 size_shortlist=-1, feature_type='sparse',
+                 shortlist_type='dynamic', shorty=None):
+        super().__init__(data_dir, fname_features, fname_labels, data,
+                         model_dir, mode, feature_indices, label_indices,
+                         keep_invalid, normalize_features, normalize_labels,
+                         feature_type, label_type='sparse')
+        self.label_features = self.load_features(
+            data_dir, fname_label_features, data['Yf'],
+            normalize_features, feature_type)
+        self.index_select(
+            feature_indices, label_indices, label_feature_indices)
+        if self.labels is None:
+            NotImplementedError(
+                "No support for shortlist w/o any label, \
+                    consider using dense dataset.")
+        self.feature_type = feature_type
+        self.size_shortlist = size_shortlist
+        self.shortlist_type = shortlist_type
+        if self.mode == 'train':
+            self._remove_samples_wo_features_and_labels()
+        if not keep_invalid:
+            # Remove labels w/o any positive instance
+            self._process_labels(model_dir)
+
+        self.shortlist = construct_handler(
+            shortlist_type=shortlist_type,
+            num_labels=self.num_labels,
+            shortlist=None,
+            model_dir=model_dir,
+            mode=mode,
+            size_shortlist=size_shortlist,
+            in_memory=True,
+            shorty=shorty)
+        self.use_shortlist = True if self.size_shortlist > 0 else False
+        self.label_padding_index = self.num_labels
+
+    def index_select(self, feature_indices,
+                     label_indices, label_feature_indices=None):
+        """Transform feature and label matrix to specified
+        features/labels only
+        """
+        if label_feature_indices is None:
+            label_feature_indices = feature_indices
+        if label_indices is not None:
+            ind = np.loadtxt(label_indices, dtype=np.int64)
+            self.labels.index_select(ind, axis=1)
+            self.label_features.index_select(ind, axis=0)
+        if feature_indices is not None:
+            ind = np.loadtxt(feature_indices, dtype=np.int64)
+            self.features.index_select(ind, axis=1)
+        if label_feature_indices is not None:
+            ind = np.loadtxt(label_feature_indices, dtype=np.int64)
+            self.label_features.index_select(ind, axis=1)
+
+    def _process_labels_train(self, data_obj):
+        """Process labels for train data
+            - Remove labels without any training instance
+            - Remove labels without any features
+        """
+        data_obj['num_labels'] = self.num_labels
+        ind_0 = self.labels.get_valid()
+        ind_1 = self.label_features.get_valid()
+        valid_labels = np.intersect1d(ind_0, ind_1)
+        self._valid_labels = valid_labels
+        self.label_features.index_select(valid_labels, axis=0)
+        self.labels.index_select(valid_labels, axis=1)
+        data_obj['valid_labels'] = valid_labels
+
+    def get_shortlist(self, index):
+        """Get data with shortlist for given data index
+        """
+        pos_labels, _ = self.labels[index]
+        return self.shortlist.get_shortlist(index, pos_labels)
+
+    def __getitem__(self, index):
+        """Get features and labels for index
+        Arguments
+        ---------
+        index: int
+            data for this index
+
+        Returns
+        -------
+        features: np.ndarray or tuple
+            for dense: np.ndarray
+            for sparse: feature indices and their weights
+        labels: tuple
+            shortlist: label indices in the shortlist
+            labels_mask: 1 for relevant; 0 otherwise
+            sim: similarity (used during prediction only)
+        label features: a list of np.ndarrays or tuples
+            * features for multiple labels are arranged in a list
+            for dense: np.ndarray
+            for sparse: feature indices and their weights
+        """
+        x = self.features[index]
+        y = self.get_shortlist(index)
+        yf = [self.label_features[idx] for idx in y[0]]
+        return x, y, yf
