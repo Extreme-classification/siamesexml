@@ -401,7 +401,7 @@ class ModelEmbedding(ModelBase):
     def __init__(self, params, net, criterion, optimizer, shorty=None):
         super().__init__(params, net, criterion, optimizer)
         self.logger.info("Haan embedding class ban gayi!")
-        self.shorty = None
+        self.shorty = shorty
 
     def _create_dataset(self, data_dir, fname_features, fname_labels,
                         fname_label_features, data=None, mode='predict',
@@ -413,12 +413,6 @@ class ModelEmbedding(ModelBase):
         """
         Create dataset as per given parameters
         """
-        if _type is None:
-            if self.shorty is None:
-                _type = 'full'
-            else:
-                _type = 'shortlist'
-                assert size_shortlist > 0, "Size of shortlist should be > 0"
         size_shortlist = self.shortlist_size \
             if size_shortlist is None else size_shortlist
         feature_type = self.feature_type \
@@ -520,10 +514,14 @@ class ModelEmbedding(ModelBase):
             label_feature_indices=label_feature_indices,
             shortlist_type=shortlist_type,
             label_indices=label_indices,
-            _type='embedding'
+            size_shortlist=1,
+            _type='embedding',
+            shorty=self.shorty
             )
         train_loader = self._create_data_loader(
             train_dataset,
+            feature_type=train_dataset.feature_type,
+            classifier_type='embedding',
             batch_size=batch_size,
             num_workers=num_workers,
             shuffle=shuffle)
@@ -534,8 +532,7 @@ class ModelEmbedding(ModelBase):
             raise NotImplementedError("Validation not yet implemented!")
             self.logger.info("Loading validation data.")
 
-        exit()
-
+        print("Shorty: ", self.shorty)
         self._fit(train_loader, train_loader_shuffle, validation_loader,
                   model_dir, result_dir, init_epoch, num_epochs,
                   validate_after, beta, use_coarse)

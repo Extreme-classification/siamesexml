@@ -201,7 +201,6 @@ class ShortlistHandlerStatic(ShortlistHandlerBase):
 
 class ShortlistHandlerDynamic(ShortlistHandlerBase):
     """ShortlistHandler with dynamic shortlist
-    - support for multiple representations for labels
 
     Parameters
     ----------
@@ -225,8 +224,10 @@ class ShortlistHandlerDynamic(ShortlistHandlerBase):
                          size_shortlist, label_mapping)
         self._create_shortlist(shortlist)
 
-    def query(self, index):
-        return self.shortlist.query(num_samples=1)
+    def query(self, num_instances=1, ind=None):
+        print("In ShortlistHandlerDynamic: ", num_instances, ind)
+        return self.shortlist.query(
+            num_instances=num_instances, ind=ind)
 
 
 class ShortlistHandlerHybrid(ShortlistHandlerBase):

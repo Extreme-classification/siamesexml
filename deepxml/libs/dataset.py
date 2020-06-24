@@ -377,7 +377,6 @@ class DatasetEmbedding(DatasetBase):
         if not keep_invalid:
             # Remove labels w/o any positive instance
             self._process_labels(model_dir)
-
         self.shortlist = construct_handler(
             shortlist_type=shortlist_type,
             num_labels=self.num_labels,
@@ -414,8 +413,8 @@ class DatasetEmbedding(DatasetBase):
             - Remove labels without any features
         """
         data_obj['num_labels'] = self.num_labels
-        ind_0 = self.labels.get_valid()
-        ind_1 = self.label_features.get_valid()
+        ind_0 = self.labels.get_valid(axis=0)
+        ind_1 = self.label_features.get_valid(axis=1)
         valid_labels = np.intersect1d(ind_0, ind_1)
         self._valid_labels = valid_labels
         self.label_features.index_select(valid_labels, axis=0)
@@ -426,7 +425,7 @@ class DatasetEmbedding(DatasetBase):
         """Get data with shortlist for given data index
         """
         pos_labels, _ = self.labels[index]
-        return self.shortlist.get_shortlist(index, pos_labels)
+        return self.shortlist.query(1, pos_labels)[0], pos_labels
 
     def __getitem__(self, index):
         """Get features and labels for index
@@ -450,6 +449,6 @@ class DatasetEmbedding(DatasetBase):
             for sparse: feature indices and their weights
         """
         x = self.features[index]
-        y = self.get_shortlist(index)
-        yf = [self.label_features[idx] for idx in y[0]]
-        return x, y, yf
+        y, ind = self.get_shortlist(index)
+        yf = self.label_features[y]  # only one index for now
+        return x, y, yf, ind

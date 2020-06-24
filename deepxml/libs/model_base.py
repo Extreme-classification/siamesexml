@@ -93,21 +93,19 @@ class ModelBase(object):
         return _dataset
 
     def _create_data_loader(self, dataset, batch_size=128,
-                            num_workers=4, shuffle=False, mode='predict'):
+                            feature_type='dense',
+                            classifier_type='dense',
+                            num_workers=4, shuffle=False, 
+                            mode='predict'):
         """
             Create data loader for given dataset
         """
-        feature_type = dataset.feature_type
-        if hasattr(dataset, 'size_shortlist'):
-            use_shortlist = True
-        else:
-            use_shortlist = False
         dt_loader = DataLoader(
             dataset,
             batch_size=batch_size,
             num_workers=num_workers,
             collate_fn=construct_collate_fn(
-                feature_type, use_shortlist),
+                feature_type, classifier_type),
             shuffle=shuffle)
         return dt_loader
 
@@ -145,6 +143,7 @@ class ModelBase(object):
         num_batches = data_loader.dataset.num_instances//data_loader.batch_size
         mean_loss = 0
         for batch_idx, batch_data in enumerate(data_loader):
+            import pdb; pdb.set_trace()
             self.net.zero_grad()
             batch_size = batch_data['batch_size']
             out_ans = self.net.forward(batch_data)

@@ -44,12 +44,14 @@ DEFAULT_PARAMS="--dataset ${dataset} \
                 --ts_label_fname tst_X_Y.txt \
                 --top_k $topk \
                 --seed ${seed} \
+                --shortlist_method random \
                 --model_fname ${MODEL_NAME} ${extra_params} \
                 --get_only knn clf"
 
 TRAIN_PARAMS="  --trans_method ${current_working_dir}/full.json \
                 --dropout 0.5 --optim Adam \
                 --lr $learning_rate \
+                --num_nbrs 1 \
                 --model_method embedding \
                 --dlr_factor $dlr_factor \
                 --dlr_step $dlr_step \
