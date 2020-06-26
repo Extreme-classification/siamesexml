@@ -143,7 +143,6 @@ class ModelBase(object):
         num_batches = data_loader.dataset.num_instances//data_loader.batch_size
         mean_loss = 0
         for batch_idx, batch_data in enumerate(data_loader):
-            import pdb; pdb.set_trace()
             self.net.zero_grad()
             batch_size = batch_data['batch_size']
             out_ans = self.net.forward(batch_data)

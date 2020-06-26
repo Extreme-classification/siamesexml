@@ -212,7 +212,7 @@ def collate_fn_sparse_embedding(batch):
         get_iterator(batch, 3), pad_val=0.0)
     batch_data['Y'] = construct_selection(
         sel_pos_indices, pos_indices.numpy().astype('int'))
-    batch_data['Y_ind'], batch_data['Yf'] = collate_sparse(
+    batch_data['YX_ind'], batch_data['YX'] = collate_sparse(
         get_iterator(batch, 2), pad_val=[0, 0.0], has_weight=True,
         dtype=[torch.LongTensor, torch.FloatTensor])
     return batch_data

@@ -52,7 +52,7 @@ def load_emeddings(params):
         indices = np.genfromtxt(params.feature_indices, dtype=np.int32)
         embeddings = embeddings[indices, :]
         del indices
-    assert params.vocabulary_dims == embeddings.shape[0]
+    #assert params.vocabulary_dims == embeddings.shape[0]
     return embeddings
 
 
@@ -80,7 +80,7 @@ def train(model, params):
         val_label_fname=params.val_label_fname,
         batch_size=params.batch_size,
         lbl_feat_fname=params.lbl_feat_fname,
-        num_workers=params.num_workers,
+        num_workers=0,  # params.num_workers,
         normalize_features=params.normalize,
         normalize_labels=params.nbn_rel,
         shuffle=params.shuffle,
@@ -230,8 +230,10 @@ def inference(model, params):
 def construct_network(params):
     """Construct DeepXML network
     """
-    if params.use_shortlist:
+    if params.network_type == 'shortlist':
         return network.DeepXMLs(params)
+    elif params.network_type == 'embedding':
+        return network.DeepXMLpp(params)
     else:
         return network.DeepXMLf(params)
 
@@ -244,13 +246,14 @@ def construct_shortlist(params):
         - parallel shortlist
     """
 
-    if not params.use_shortlist:
-        return None
+    # if not params.use_shortlist:
+    #     return None
 
     if params.shortlist_method == 'random':  # Negative Sampling
-        shorty = negative_sampling.NegativeSampler(
+        print("Random shortlist bana raha.")
+        shorty = negative_sampling.Sampler(
             num_labels=params.num_labels,
-            num_negatives=params.num_nbrs,
+            num_samples=params.num_nbrs,
             prob=None,
             replace=False)
     elif params.shortlist_method == 'centroids':
@@ -289,9 +292,11 @@ def construct_model(params, net, criterion, optimizer, shorty):
         model = model_utils.ModelShortlist(
             params, net, criterion, optimizer, shorty)
     elif params.model_method == 'full':
-        model = model_utils.ModelFull(params, net, criterion, optimizer)
+        model = model_utils.ModelFull(
+            params, net, criterion, optimizer)
     elif params.model_method == 'embedding':
-        model = model_utils.ModelEmbedding(params, net, criterion, optimizer)
+        model = model_utils.ModelEmbedding(
+            params, net, criterion, optimizer, shorty)
     else:
         raise NotImplementedError("Unknown model_method.")
     return model
@@ -321,9 +326,9 @@ def main(params):
             params.label_padding_index = params.num_labels
         net = construct_network(params)
         word_embeddings = load_emeddings(params)
-        net.initialize_embeddings(word_embeddings)
-        del word_embeddings
-        print("Initialized embeddings!")
+        # net.initialize_embeddings(word_embeddings)
+        # del word_embeddings
+        # print("Initialized embeddings!")
         criterion = construct_loss(params)
         print("Model parameters: ", params)
         print("\nModel configuration: ", net)

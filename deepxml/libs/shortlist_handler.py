@@ -225,7 +225,6 @@ class ShortlistHandlerDynamic(ShortlistHandlerBase):
         self._create_shortlist(shortlist)
 
     def query(self, num_instances=1, ind=None):
-        print("In ShortlistHandlerDynamic: ", num_instances, ind)
         return self.shortlist.query(
             num_instances=num_instances, ind=ind)
 

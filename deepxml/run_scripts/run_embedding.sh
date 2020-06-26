@@ -25,13 +25,14 @@ embedding_file="fasttextB_embeddings_${embedding_dims}d.npy"
 
 stats=`python3 -c "import sys, json; print(json.load(open('${temp_model_data}/aux_stats.json'))['${quantile}'])"` 
 stats=($(echo $stats | tr ',' "\n"))
-vocabulary_dims=${stats[0]}
+vocabulary_dims=$((${stats[0]}+1))
 num_labels=${stats[2]}
 
 DEFAULT_PARAMS="--dataset ${dataset} \
                 --data_dir=${work_dir}/data \
                 --num_labels ${num_labels} \
-                --vocabulary_dims ${vocabulary_dims} \
+                --vocabulary_dims_document ${vocabulary_dims} \
+                --vocabulary_dims_label ${vocabulary_dims} \
                 --embeddings $embedding_file \
                 --embedding_dims ${embedding_dims} \
                 --num_epochs $num_epochs \
@@ -48,7 +49,8 @@ DEFAULT_PARAMS="--dataset ${dataset} \
                 --model_fname ${MODEL_NAME} ${extra_params} \
                 --get_only knn clf"
 
-TRAIN_PARAMS="  --trans_method ${current_working_dir}/full.json \
+TRAIN_PARAMS="  --trans_method_document ${current_working_dir}/embedding.json \
+                --trans_method_label ${current_working_dir}/embedding.json \
                 --dropout 0.5 --optim Adam \
                 --lr $learning_rate \
                 --num_nbrs 1 \

@@ -34,12 +34,19 @@ class Parameters(ParametersBase):
             type=int,
             help='seed values')
         self.parser.add_argument(
-            '--trans_method',
-            dest='trans_method',
+            '--trans_method_document',
+            dest='trans_method_document',
             default='non_linear',
             type=str,
             action='store',
-            help='which network to use')
+            help='which network to use for document')
+        self.parser.add_argument(
+            '--trans_method_label',
+            dest='trans_method_label',
+            default='non_linear',
+            type=str,
+            action='store',
+            help='which network to use for label')
         self.parser.add_argument(
             '--lr',
             dest='learning_rate',
@@ -187,6 +194,20 @@ class Parameters(ParametersBase):
             type=int,
             help='#features')
         self.parser.add_argument(
+            '--vocabulary_dims_document',
+            dest='vocabulary_dims_document',
+            default=-1,
+            action='store',
+            type=int,
+            help='#features on document side')
+        self.parser.add_argument(
+            '--vocabulary_dims_label',
+            dest='vocabulary_dims_label',
+            default=-1,
+            action='store',
+            type=int,
+            help='#features on label side')
+        self.parser.add_argument(
             '--padding_idx',
             dest='padding_idx',
             default=0,
@@ -278,6 +299,13 @@ class Parameters(ParametersBase):
             action='store',
             help='#Centroids (Use multiple for ext head if more than 1)')
         self.parser.add_argument(
+            '--network_type',
+            dest='network_type',
+            default='embedding',
+            type=str,
+            action='store',
+            help='Type of network: full/shortlist/embedding')
+        self.parser.add_argument(
             '--beta',
             dest='beta',
             default=0.2,
@@ -312,6 +340,13 @@ class Parameters(ParametersBase):
             type=str,
             action='store',
             help='train or predict')
+        self.parser.add_argument(
+            '--metric',
+            dest='metric',
+            default='cosine',
+            type=str,
+            action='store',
+            help='cosine/dot')
         self.parser.add_argument(
             '--keep_invalid',
             action='store_true',
@@ -362,6 +397,11 @@ class Parameters(ParametersBase):
             '--huge_dataset',
             action='store_true',
             help='Is it a really large dataset?'
+        )
+        self.parser.add_argument(
+            '--share_weights',
+            action='store_true',
+            help='Share weights b/w document and label encoder'
         )
         self.parser.add_argument(
             '--use_coarse_for_shorty',

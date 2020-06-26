@@ -1,0 +1,13 @@
+{
+    "transform_coarse": {
+        "order": ["relu", "dropout"],
+        "relu": {},
+        "dropout": {
+            "p": 0.5
+        }
+    },
+    "transform_fine": {
+        "order": ["identity"],
+        "identity": {}
+    }
+}
