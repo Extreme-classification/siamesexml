@@ -5,21 +5,21 @@ import sys
 from scipy.sparse import lil_matrix
 import numpy as np
 from sklearn.preprocessing import normalize
-from .dataset_base import DatasetBase
+from .dataset_base import DatasetBase, DatasetTensor
 import xclib.data.data_utils as data_utils
 import operator
 from .lookup import Table
 from .shortlist_handler import construct_handler
 
 
-def construct_dataset(_type, data_dir, fname_features, fname_labels,
-                      fname_label_features, data=None, model_dir='',
+def construct_dataset(_type, data_dir, fname_features, fname_labels=None,
+                      fname_label_features=None, data=None, model_dir='',
                       mode='train', size_shortlist=-1,
                       normalize_features=True, normalize_labels=True,
                       keep_invalid=False, feature_type='sparse',
                       feature_indices=None, label_indices=None,
                       label_feature_indices=None, shortlist_type='static',
-                      shorty=None):
+                      shorty=None, pretrained_shortlist=None):
     if _type == 'full':
         return DatasetDense(
             data_dir, fname_features, fname_labels, fname_label_features,
@@ -39,7 +39,13 @@ def construct_dataset(_type, data_dir, fname_features, fname_labels,
             data, model_dir, mode, feature_indices, label_indices,
             label_feature_indices, keep_invalid, normalize_features,
             normalize_labels, size_shortlist,
-            feature_type, shortlist_type, shorty)
+            feature_type, shortlist_type, shorty,
+            pretrained_shortlist=pretrained_shortlist)
+    elif _type == 'tensor':
+        return DatasetTensor(
+            data_dir, fname_features, data, feature_indices, feature_type)
+    else:
+        raise NotImplementedError("Unknown dataset type")
 
 
 class DatasetDense(DatasetBase):

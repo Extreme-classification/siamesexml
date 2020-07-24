@@ -66,7 +66,7 @@ def collate_as_np_1d(x, dtype):
     dtype: datatype, optional (default=torch.FloatTensor)
         features should be of this type
     """
-    return np.concatenate(list(x)).astype(dtype)
+    return np.fromiter(x, dtype=dtype)
 
 
 def collate_sparse(x, pad_val=0.0, has_weight=False, dtype=torch.FloatTensor):
@@ -115,13 +115,22 @@ def construct_selection(sel_pos_indices, pos_indices):
     return selection
 
 
-def get_iterator(x, ind):
-    return map(lambda z: z[ind], x)
+def get_iterator(x, ind=None):
+    if ind is None:
+        return map(lambda z: z, x)
+    else:
+        return map(lambda z: z[ind], x)
 
 
 def construct_collate_fn(feature_type, classifier_type='dense'):
     def _collate_fn_dense_full(batch):
         return collate_fn_dense_full(batch)
+
+    def _collate_fn_dense(batch):
+        return collate_fn_dense(batch)
+
+    def _collate_fn_sparse(batch):
+        return collate_fn_sparse(batch)
 
     def _collate_fn_dense_sl(batch):
         return collate_fn_dense_sl(batch)
@@ -133,12 +142,16 @@ def construct_collate_fn(feature_type, classifier_type='dense'):
         return collate_fn_sparse_sl(batch)
 
     if feature_type == 'dense':
-        if classifier_type == 'shortlist':
+        if classifier_type == 'None':
+            return _collate_fn_dense
+        elif classifier_type == 'shortlist':
             return _collate_fn_dense_sl
         else:
             return _collate_fn_dense_full
     else:
-        if classifier_type == 'shortlist':
+        if classifier_type == 'None':
+            return _collate_fn_sparse
+        elif classifier_type == 'shortlist':
             return _collate_fn_sparse_sl
         else:
             return _collate_fn_sparse_embedding
@@ -228,4 +241,26 @@ def collate_fn_dense_embedding(batch):
         get_iterator(batch, 0), pad_val=[0, 0.0], has_weight=True,
         dtype=[torch.LongTensor, torch.FloatTensor])
     batch_data['Y'] = collate_dense(get_iterator(batch, 1))
+    return batch_data
+
+
+def collate_fn_sparse(batch):
+    """
+        Combine each sample in a batch
+        For sparse features
+    """
+    batch_data = {'batch_size': len(batch), 'X_ind': None}
+    batch_data['X_ind'], batch_data['X'] = collate_sparse(
+        get_iterator(batch), pad_val=[0, 0.0], has_weight=True,
+        dtype=[torch.LongTensor, torch.FloatTensor])
+    return batch_data
+
+
+def collate_fn_dense(batch):
+    """
+        Combine each sample in a batch
+        For sparse features
+    """
+    batch_data = {'batch_size': len(batch), 'X_ind': None}
+    batch_data['X'] = collate_dense(get_iterator(batch))
     return batch_data
