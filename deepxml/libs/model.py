@@ -2,7 +2,7 @@ import logging
 import math
 import os
 import time
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, issparse
 import _pickle as pickle
 from .model_base import ModelBase
 import torch.utils.data
@@ -12,6 +12,9 @@ import sys
 import libs.shortlist_utils as shortlist_utils
 import libs.utils as utils
 from .dataset import construct_dataset
+from .shortlist import ShortlistMIPS, ShortlistCentroids
+from xclib.utils.sparse import csr_from_arrays
+import xclib.evaluation.xc_metrics as xc_metrics
 
 
 class ModelFull(ModelBase):
@@ -400,23 +403,19 @@ class ModelEmbedding(ModelBase):
 
     def __init__(self, params, net, criterion, optimizer, shorty=None):
         super().__init__(params, net, criterion, optimizer)
-        self.logger.info("Haan embedding class ban gayi!")
         self.shorty = shorty
 
-    def _create_dataset(self, data_dir, fname_features, fname_labels,
-                        fname_label_features, data=None, mode='predict',
+    def _create_dataset(self, data_dir, fname_features, fname_labels=None,
+                        fname_label_features=None, data=None, mode='predict',
                         normalize_features=True, normalize_labels=False,
-                        feature_type=None, keep_invalid=False,
+                        feature_type='sparse', keep_invalid=False,
                         feature_indices=None, label_indices=None,
-                        label_feature_indices=None, size_shortlist=None,
-                        shortlist_type='static', shorty=None, _type=None):
+                        label_feature_indices=None, size_shortlist=-1,
+                        shortlist_type='static', shorty=None,
+                        _type=None, pretrained_shortlist=None):
         """
         Create dataset as per given parameters
         """
-        size_shortlist = self.shortlist_size \
-            if size_shortlist is None else size_shortlist
-        feature_type = self.feature_type \
-            if feature_type is None else feature_type
         _dataset = construct_dataset(
             _type=_type,
             data_dir=data_dir,
@@ -435,24 +434,23 @@ class ModelEmbedding(ModelBase):
             label_indices=label_indices,
             label_feature_indices=label_feature_indices,
             shortlist_type=shortlist_type,
+            pretrained_shortlist=pretrained_shortlist,
             shorty=shorty)
         return _dataset
 
-    def _fit(self, train_loader, train_loader_shuffle,
-             validation_loader, model_dir,
-             result_dir, init_epoch, num_epochs,
-             validate_after, beta, use_coarse):
+    def _fit(self, train_loader, validation_loader, model_dir,
+             result_dir, init_epoch, num_epochs, validate_after,
+             beta, use_coarse, filter_map):
         for epoch in range(init_epoch, init_epoch+num_epochs):
             cond = self.dlr_step != -1 and epoch % self.dlr_step == 0
             if epoch != 0 and cond:
-                self._adjust_parameters()
+                self._adjust_parameters(decay_dlr=False)
             batch_train_start_time = time.time()
-            tr_avg_loss = self._step(train_loader_shuffle, batch_div=True)
+            tr_avg_loss = self._step(train_loader, batch_div=False)
             self.tracking.mean_train_loss.append(tr_avg_loss)
             batch_train_end_time = time.time()
             self.tracking.train_time = self.tracking.train_time + \
                 batch_train_end_time - batch_train_start_time
-
             self.logger.info(
                 "Epoch: {}, loss: {}, time: {} sec".format(
                     epoch, tr_avg_loss,
@@ -460,23 +458,22 @@ class ModelEmbedding(ModelBase):
             if validation_loader is not None and epoch % validate_after == 0:
                 val_start_t = time.time()
                 predicted_labels, val_avg_loss = self._validate(
-                    validation_loader, beta)
+                    train_loader, validation_loader, beta)
                 val_end_t = time.time()
                 _acc = self.evaluate(
-                    validation_loader.dataset.labels.Y, predicted_labels)
+                    validation_loader.dataset.labels.data,
+                    predicted_labels, filter_map)
                 self.tracking.validation_time = self.tracking.validation_time \
                     + val_end_t - val_start_t
                 self.tracking.mean_val_loss.append(val_avg_loss)
-                self.tracking.val_precision.append(_acc['combined'][0])
-                self.tracking.val_ndcg.append(_acc['combined'][1])
+                self.tracking.val_precision.append(_acc['knn'][0])
+                self.tracking.val_ndcg.append(_acc['knn'][1])
                 self.logger.info("Model saved after epoch: {}".format(epoch))
                 self.save_checkpoint(model_dir, epoch+1)
                 self.tracking.last_saved_epoch = epoch
                 self.logger.info(
-                    "P@1 (combined): {}, P@1 (knn): {}, "
-                    "P@1 (clf): {}, loss: {}, time: {} sec".format(
-                        _acc['combined'][0][0]*100, _acc['knn'][0][0]*100,
-                        _acc['clf'][0][0]*100, val_avg_loss,
+                    "P@1 (knn): {}, time: {} sec".format(
+                        _acc['knn'][0][0]*100,
                         val_end_t-val_start_t))
             self.tracking.last_epoch += 1
 
@@ -488,7 +485,7 @@ class ModelEmbedding(ModelBase):
                 self.tracking.train_time,
                 self.tracking.validation_time,
                 self.tracking.shortlist_time,
-                self.net.model_size)/math.pow(2, 20))
+                self.net.model_size))
 
     def fit(self, data_dir, model_dir, result_dir, dataset, learning_rate,
             num_epochs, data=None, trn_feat_fname='trn_X_Xf.txt',
@@ -498,7 +495,7 @@ class ModelEmbedding(ModelBase):
             keep_invalid=False, feature_indices=None, label_indices=None,
             label_feature_indices=None, normalize_features=True,
             normalize_labels=False, validate=False, beta=0.2, use_coarse=True,
-            validate_after=5, sampling_type=None, shortlist_type=None):
+            validate_after=30, sampling_type=None, shortlist_type=None):
         self.logger.info("Loading training data.")
         train_dataset = self._create_dataset(
             os.path.join(data_dir, dataset),
@@ -525,14 +522,100 @@ class ModelEmbedding(ModelBase):
             batch_size=batch_size,
             num_workers=num_workers,
             shuffle=shuffle)
-        train_loader_shuffle = train_loader
 
         validation_loader = None
+        filter_map = None
         if validate:
-            raise NotImplementedError("Validation not yet implemented!")
             self.logger.info("Loading validation data.")
+            validation_dataset = self._create_dataset(
+                os.path.join(data_dir, dataset),
+                fname_features=val_feat_fname,
+                fname_labels=val_label_fname,
+                fname_label_features=lbl_feat_fname,
+                data=data,
+                mode='predict',
+                keep_invalid=keep_invalid,
+                normalize_features=normalize_features,
+                normalize_labels=normalize_labels,
+                feature_indices=feature_indices,
+                label_feature_indices=label_feature_indices,
+                shortlist_type=shortlist_type,
+                label_indices=label_indices,
+                size_shortlist=1,
+                _type='embedding',
+                shorty=self.shorty
+                )
+            validation_loader = self._create_data_loader(
+                validation_dataset,
+                feature_type=validation_dataset.feature_type,
+                classifier_type='embedding',
+                batch_size=batch_size,
+                num_workers=num_workers,
+                shuffle=False)
+            filter_map = os.path.join(
+                data_dir, dataset, 'filter_labels_test.txt')
+            filter_map = np.loadtxt(filter_map).astype(np.int)
+            val_ind = []
+            valid_mapping = dict(
+                zip(train_dataset._valid_labels,
+                    np.arange(train_dataset.num_labels)))
+            for i in range(len(filter_map)):
+                if filter_map[i, 1] in valid_mapping:
+                    filter_map[i, 1] = valid_mapping[filter_map[i, 1]]
+                    val_ind.append(i)
+            filter_map = filter_map[val_ind]
 
-        print("Shorty: ", self.shorty)
-        self._fit(train_loader, train_loader_shuffle, validation_loader,
-                  model_dir, result_dir, init_epoch, num_epochs,
-                  validate_after, beta, use_coarse)
+        self._fit(train_loader, validation_loader, model_dir, result_dir,
+                  init_epoch, num_epochs, validate_after, beta, use_coarse,
+                  filter_map)
+
+    def _validate(self, train_data_loader, data_loader, beta=0.2, gamma=0.5):
+        self.net.eval()
+        torch.set_grad_enabled(False)
+        num_labels = data_loader.dataset.num_labels
+        self.logger.info("Getting val document embeddings")
+        val_doc_embeddings = self.get_embeddings(
+            data=data_loader.dataset.features.data,
+            encoder=self.net.encode_document,
+            batch_size=data_loader.batch_size,
+            feature_type=data_loader.dataset.feature_type
+            )
+        self.logger.info("Getting label embeddings")
+        lbl_embeddings = self.get_embeddings(
+            data=train_data_loader.dataset.label_features.data,
+            encoder=self.net.encode_label,
+            batch_size=train_data_loader.batch_size,
+            feature_type=train_data_loader.dataset.feature_type
+            )
+
+        _shorty = ShortlistMIPS()
+        _shorty.fit(lbl_embeddings)
+        predicted_labels = {}
+        ind, val = _shorty.query(val_doc_embeddings)
+        predicted_labels['knn'] = csr_from_arrays(
+            ind, val, shape=(data_loader.dataset.num_instances, num_labels+1))
+        return self._strip_padding_label(predicted_labels, num_labels), \
+            'NaN'
+
+    def _strip_padding_label(self, mat, num_labels):
+        stripped_vals = {}
+        for key, val in mat.items():
+            stripped_vals[key] = val[:, :num_labels].tocsr()
+            del val
+        return stripped_vals
+
+    def evaluate(self, true_labels, predicted_labels, filter_map=None):
+        def _filter(pred, mapping):
+            if mapping is not None:
+                pred[mapping[:, 0], mapping[:, 1]] = 0
+                pred.eliminate_zeros()
+            return pred
+
+        if issparse(predicted_labels):
+            return self._evaluate(
+                true_labels, _filter(predicted_labels, filter_map))
+        else:  # Multiple set of predictions
+            acc = {}
+            for key, val in predicted_labels.items():
+                acc[key] = self._evaluate(true_labels, _filter(val, filter_map))
+            return acc

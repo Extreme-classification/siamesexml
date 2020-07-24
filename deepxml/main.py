@@ -12,9 +12,9 @@ import models.network as network
 import libs.shortlist as shortlist
 import libs.shortlist_utils as shortlist_utils
 import libs.model as model_utils
-import libs.optimizer_utils as optimizer_utils
+import libs.optimizer as optimizer
 import libs.parameters as parameters
-import libs.negative_sampling as negative_sampling
+import libs.sampling as sampling
 import libs.loss as loss
 
 
@@ -45,14 +45,12 @@ def load_emeddings(params):
         if Path(fname).is_file():
             embeddings = np.load(fname)
         else:
-            print("Generating random embeddings")
-            embeddings = np.random.rand(
-                params.vocabulary_dims, params.embedding_dims)
+            raise FileNotFoundError(f"{fname} not found!")
+            exit()
     if params.feature_indices is not None:
         indices = np.genfromtxt(params.feature_indices, dtype=np.int32)
         embeddings = embeddings[indices, :]
         del indices
-    #assert params.vocabulary_dims == embeddings.shape[0]
     return embeddings
 
 
@@ -80,7 +78,7 @@ def train(model, params):
         val_label_fname=params.val_label_fname,
         batch_size=params.batch_size,
         lbl_feat_fname=params.lbl_feat_fname,
-        num_workers=0,  # params.num_workers,
+        num_workers=params.num_workers,
         normalize_features=params.normalize,
         normalize_labels=params.nbn_rel,
         shuffle=params.shuffle,
@@ -250,12 +248,11 @@ def construct_shortlist(params):
     #     return None
 
     if params.shortlist_method == 'random':  # Negative Sampling
-        print("Random shortlist bana raha.")
-        shorty = negative_sampling.Sampler(
+        shorty = sampling.Sampler(
             num_labels=params.num_labels,
             num_samples=params.num_nbrs,
             prob=None,
-            replace=False)
+            replace=True)
     elif params.shortlist_method == 'centroids':
         shorty = shortlist.ShortlistCentroids(
             method=params.ann_method,
@@ -278,7 +275,7 @@ def construct_shortlist(params):
     return shorty
 
 
-def construct_model(params, net, criterion, optimizer, shorty):
+def construct_model(params, net, criterion, opt, shorty):
     """Construct shorty
     * Support for:
         - negative sampling (ns)
@@ -287,22 +284,22 @@ def construct_model(params, net, criterion, optimizer, shorty):
     """
     if params.model_method == 'ns':  # Random negative Sampling
         model = model_utils.ModelNS(
-            params, net, criterion, optimizer, shorty)
+            params, net, criterion, opt, shorty)
     elif params.model_method == 'shortlist':  # Approximate Nearest Neighbor
         model = model_utils.ModelShortlist(
-            params, net, criterion, optimizer, shorty)
+            params, net, criterion, opt, shorty)
     elif params.model_method == 'full':
         model = model_utils.ModelFull(
-            params, net, criterion, optimizer)
+            params, net, criterion, opt)
     elif params.model_method == 'embedding':
         model = model_utils.ModelEmbedding(
-            params, net, criterion, optimizer, shorty)
+            params, net, criterion, opt, shorty)
     else:
         raise NotImplementedError("Unknown model_method.")
     return model
 
 
-def construct_loss(params, pos_weight=None):
+def construct_loss(params, pos_weight=2.0):
     _reduction = 'sum' if params.use_shortlist else 'mean'
     # pad index is for OVA training and not shortlist
     # pass mask for shortlist
@@ -312,8 +309,8 @@ def construct_loss(params, pos_weight=None):
             reduction=_reduction, pad_ind=_pad_ind, pos_weight=pos_weight)
     else:
         return loss.CosineEmbeddingLoss(
-            reduction=_reduction, pad_ind=_pad_ind,
-            pos_weight=pos_weight, margin=params.margin)
+            reduction=_reduction, pos_weight=pos_weight,
+            margin=params.margin)
 
 
 def main(params):
@@ -325,24 +322,33 @@ def main(params):
         if params.use_shortlist:
             params.label_padding_index = params.num_labels
         net = construct_network(params)
-        word_embeddings = load_emeddings(params)
-        # net.initialize_embeddings(word_embeddings)
-        # del word_embeddings
-        # print("Initialized embeddings!")
+        if params.init == 'inermediate':
+            print("Loading intermediate representation.")
+            net.load_intermediate_model(
+                os.path.join(os.path.dirname(params.model_dir), "Z.pkl"))
+        elif params.init == 'pretrained':
+            print("Loading pre-trained embeddings.")
+            embeddings = load_emeddings(params)
+            net.initialize(embeddings)
+            del embeddings
+        else:  # trust the random init
+            print("Random initialization.")
         criterion = construct_loss(params)
         print("Model parameters: ", params)
         print("\nModel configuration: ", net)
-        optimizer = optimizer_utils.Optimizer(
+        opt = optimizer.Optimizer(
             opt_type=params.optim,
             learning_rate=params.learning_rate,
             momentum=params.momentum,
-            freeze_embeddings=params.freeze_embeddings,
             weight_decay=params.weight_decay)
-        optimizer.construct(net)
+        opt.construct(net)
         shorty = construct_shortlist(params)
-        model = construct_model(params, net, criterion, optimizer, shorty)
+        model = construct_model(params, net, criterion, opt, shorty)
         model.transfer_to_devices()
         train(model, params)
+        if params.save_intermediate:
+            net.save_intermediate_model(
+                os.path.join(os.path.dirname(params.model_dir), "Z.pkl"))
         fname = os.path.join(params.result_dir, 'params.json')
         utils.save_parameters(fname, params)
 
@@ -353,20 +359,20 @@ def main(params):
         criterion = construct_loss(params)
         print("Model parameters: ", params)
         print("\nModel configuration: ", net)
-        optimizer = optimizer_utils.Optimizer(
+        opt = optimizer.Optimizer(
             opt_type=params.optim,
             learning_rate=params.learning_rate,
             momentum=params.momentum,
             freeze_embeddings=params.freeze_embeddings,
             weight_decay=params.weight_decay)
         shorty = construct_shortlist(params)
-        model = construct_model(params, net, criterion, optimizer, shorty)
+        model = construct_model(params, net, criterion, opt, shorty)
 
         model.load_checkpoint(
             params.model_dir, params.model_fname, params.last_epoch)
         model.transfer_to_devices()
-        optimizer = optimizer
-        optimizer.construct(net)
+        opt = opt
+        opt.construct(net)
         print("Model configuration is: ", params)
         train(model, params)
 
@@ -391,7 +397,7 @@ def main(params):
         print("\nModel configuration: ", net)
         shorty = construct_shortlist(params)
         model = construct_model(
-            params, net, criterion=None, optimizer=None, shorty=shorty)
+            params, net, criterion=None, opt=None, shorty=shorty)
         model.load(params.model_dir, params.model_fname)
         model.transfer_to_devices()
         if params.ts_feat_fname == "0":

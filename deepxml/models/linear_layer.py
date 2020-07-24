@@ -36,7 +36,10 @@ class Linear(nn.Module):
         self.reset_parameters()
 
     def forward(self, input):
-        return F.linear(input.to(self.device), self.weight, self.bias.view(-1))
+        if self.bias is not None:
+            return F.linear(input.to(self.device), self.weight, self.bias.view(-1))
+        else:
+            return F.linear(input.to(self.device), self.weight)
 
     def to(self):
         """Transfer to device
@@ -56,8 +59,10 @@ class Linear(nn.Module):
         Bias is appended in the end
         """
         _wts = self.weight.detach().cpu().numpy()
-        _bias = self.bias.detach().cpu().numpy()
-        return np.hstack([_wts, _bias])
+        if self.bias is not None:
+            _bias = self.bias.detach().cpu().numpy()
+            _wts = np.hstack([_wts, _bias])
+        return _wts
 
     def __repr__(self):
         s = '{name}({input_size}, {output_size}, {device}'
@@ -65,6 +70,10 @@ class Linear(nn.Module):
             s += ', bias=True'
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
+
+    @property
+    def sparse(self):
+        return False
 
 
 class SparseLinear(Linear):
@@ -87,11 +96,10 @@ class SparseLinear(Linear):
                  bias=True, device="cuda:0"):
         self.padding_idx = padding_idx
         super(SparseLinear, self).__init__(
-            input_size=input_size, 
+            input_size=input_size,
             output_size=output_size,
-            bias=bias, 
+            bias=bias,
             device=device)
-        self.sparse = True  # Required for optimizer
 
     def forward(self, embed, shortlist):
         """Forward pass for Linear sparse layer
@@ -146,11 +154,18 @@ class SparseLinear(Linear):
         Bias is appended in the end
         """
         _wts = self.weight.detach().cpu().numpy()
-        _bias = self.bias.detach().cpu().numpy()
         if self.padding_idx is not None:
             _wts = _wts[:-1, :]
-            _bias = _bias[:-1, :]
-        return np.hstack([_wts, _bias])
+        if (self.bias is not None):
+            _bias = self.bias.detach().cpu().numpy()
+            if self.padding_idx is not None:
+                _bias = _bias[:-1, :]
+            _wts = np.hstack([_wts, _bias])
+        return _wts
+
+    @property
+    def sparse(self):
+        return True
 
 
 class ParallelLinear(nn.Module):
@@ -179,9 +194,9 @@ class ParallelLinear(nn.Module):
         if devices is None:  # Keep everything on cuda:0
             self.devices = ["cuda:{}".format(idx) for idx in num_partitions]
         self.num_partitions = num_partitions
-        self.classifier = self._construct_clf()
+        self.classifier = self._construct()
 
-    def _construct_clf(self):
+    def _construct(self):
         self._output_sizes = [item.size for item in np.array_split(
             np.arange(self.output_size), self.num_partitions)]
         clf = nn.ModuleList()
@@ -243,7 +258,6 @@ class ParallelSparseLinear(ParallelLinear):
     def __init__(self, input_size, output_size, padding_idx=None,
                  bias=True, num_partitions=2, devices=None):
         self.padding_idx = padding_idx
-        self.sparse = True  # Required for optimizer
         super(ParallelSparseLinear, self).__init__(
             input_size=input_size,
             output_size=output_size,
@@ -251,7 +265,7 @@ class ParallelSparseLinear(ParallelLinear):
             num_partitions=num_partitions,
             devices=devices)
 
-    def _construct_clf(self):
+    def _construct(self):
         self._output_sizes = [item.size for item in np.array_split(
             np.arange(self.output_size), self.num_partitions)]
         clf = nn.ModuleList()
@@ -273,6 +287,7 @@ class ParallelSparseLinear(ParallelLinear):
         out: list
             logits for each partition
         """
+        out = []
         for idx in range(self.num_partitions):
             out.append(self.classifier[idx](embed, shortlist[idx]))
         return out

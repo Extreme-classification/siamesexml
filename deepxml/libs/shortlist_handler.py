@@ -3,7 +3,7 @@ import _pickle as pickle
 import operator
 import os
 from .lookup import Table
-from .negative_sampling import NegativeSampler
+from .sampling import NegativeSampler
 from scipy.sparse import load_npz
 from xclib.utils import sparse as sp
 

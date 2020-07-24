@@ -11,6 +11,7 @@ import numba
 import math
 from operator import itemgetter
 from libs.clustering import Cluster
+from libs.utils import map_neighbors, map_centroids
 
 
 class Shortlist(object):
@@ -119,7 +120,7 @@ class ShortlistCentroids(Shortlist):
     """
     def __init__(self, method='hnsw', num_neighbours=300, M=100, efC=300,
                  efS=300, num_threads=24, space='cosine', verbose=True,
-                 num_clusters=1, threshold=5000):
+                 num_clusters=1, threshold=7500, pad_val=-10000):
         super().__init__(method, num_neighbours, M, efC, efS, num_threads)
         self.num_clusters = num_clusters
         self.space = space
@@ -127,6 +128,7 @@ class ShortlistCentroids(Shortlist):
         self.mapping = None
         self.ext_head = None
         self.threshold = threshold
+        self.pad_val = pad_val
 
     def _cluster_multiple_rep(self, features, labels, label_centroids,
                               multi_centroid_indices):
@@ -170,31 +172,13 @@ class ShortlistCentroids(Shortlist):
     def _remap(self, indices, sims):
         if self.mapping is None:
             return indices, sims
-        print("Re-mapping code not optimized")
-        mapped_indices = np.full_like(indices, self.pad_ind)
-        # minimum similarity for padding index
-        mapped_sims = np.full_like(sims, -1000.0)
-        for idx, (ind, sim) in enumerate(zip(indices, sims)):
-            _ind, _sim = self._remap_one(ind, sim)
-            mapped_indices[idx, :len(_ind)] = _ind
-            mapped_sims[idx, :len(_sim)] = _sim
-        return mapped_indices, mapped_sims
-
-    def _remap_one(self, indices, vals, _func=max, _limit=-1000):
-        """
-            Remap multiple centroids to original labels
-        """
-        indices = map(lambda x: self.mapping[x], indices)
-        _dict = dict({})
-        for idx, ind in enumerate(indices):
-            _dict[ind] = _func(_dict.get(ind, _limit), vals[idx])
-        indices, values = zip(*_dict.items())
-        return np.fromiter(indices, dtype=np.int64), \
-            np.fromiter(values, dtype=np.float32)
+        return map_centroids(
+            indices, sims, self.mapping, self.pad_ind, self.pad_val)
 
     def load(self, fname):
         temp = pickle.load(open(fname+".metadata", 'rb'))
         self.pad_ind = temp['pad_ind']
+        self.pad_val = temp['pad_val']
         self.mapping = temp['mapping']
         self.ext_head = temp['ext_head']
         super().load(fname+".index")
@@ -202,6 +186,7 @@ class ShortlistCentroids(Shortlist):
     def save(self, fname):
         metadata = {
             'pad_ind': self.pad_ind,
+            'pad_val': self.pad_val,
             'mapping': self.mapping,
             'ext_head': self.ext_head
         }
@@ -216,7 +201,109 @@ class ShortlistCentroids(Shortlist):
             os.remove(fname+".metadata")
 
 
-class ShortlistEmbeddings(Shortlist):
+class ShortlistInstances(Shortlist):
+    """Get nearest labels using KNN
+    * brute or HNSW algorithm for search
+    Parameters
+    ----------
+    method: str, optional, default='hnsw'
+        brute or hnsw
+    num_neighbours: int
+        number of labels to keep per data point
+        * labels may be shared across fetched instances
+        * union of labels can be large when dataset is densly tagged
+    M: int, optional, default=100
+        HNSW M (Usually 100)
+    efC: int, optional, default=300
+        construction parameter (Usually 300)
+    efS: int, optional, default=300
+        search parameter (Usually 300)
+    num_threads: int, optional, default=18
+        use multiple threads to cluster
+    space: str, optional, default='cosine'
+        metric to use while quering
+    verbose: boolean, optional, default=True
+        print progress
+    num_clusters: int, optional, default=1
+        cluster instances => multiple representatives for chosen labels
+    pad_val: int, optional, default=-10000
+        value for padding indices
+        - Useful as all documents may have different number of nearest
+        labels after collasping them
+    """
+    def __init__(self, method='hnsw', num_neighbours=300, M=100, efC=300,
+                 efS=300, num_threads=24, space='cosine', verbose=False,
+                 pad_val=-10000):
+        super().__init__(method, num_neighbours, M, efC, efS, num_threads)
+        self.labels = None
+        self.space = space
+        self.pad_ind = None
+        self.pad_val = pad_val
+
+    def _remove_invalid(self, features, labels):
+        # Keep data points with nnz features and atleast one label
+        ind_ft = np.where(np.sum(np.square(features), axis=1) > 0)[0]
+        ind_lb = np.where(np.sum(labels, axis=1) > 0)[0]
+        ind = np.intersect1d(ind_ft, ind_lb)
+        return features[ind], labels[ind]
+
+    def _as_array(self, labels):
+        n_pos_labels = list(map(len, labels))
+        _labels = np.full(
+            (len(labels), max(n_pos_labels)),
+            self.pad_ind, np.int64)
+        for ind, _lab in enumerate(labels):
+            _labels[ind, :n_pos_labels[ind]] = labels[ind]
+        return _labels
+
+    def _remap(self, indices, distances):
+        return map_neighbors(
+            indices, 1-distances,
+            self.labels, self.num_neighbours,
+            self.pad_ind, self.pad_val)
+
+    def fit(self, features, labels):
+        features, labels = self._remove_invalid(features, labels)
+        self.index.fit(features)
+        self.pad_ind = labels.shape[1]
+        self.labels = self._as_array(labels.tolil().rows)
+
+    def query(self, data, *args, **kwargs):
+        indices, distances = self.index.predict(data)
+        indices, similarities = self._remap(indices, distances)
+        return indices, similarities
+
+    def save(self, fname):
+        self.index.save(fname+".index")
+        pickle.dump(
+            {'labels': self.labels,
+             'M': self.M, 'efC': self.efC,
+             'efS': self.efS,
+             'pad_ind': self.pad_ind,
+             'pad_val': self.pad_val,
+             'num_neighbours': self.num_neighbours,
+             'space': self.space}, open(fname+".metadata", 'wb'))
+
+    def load(self, fname):
+        self.index.load(fname+".index")
+        obj = pickle.load(
+            open(fname+".metadata", 'rb'))
+        self.num_neighbours = obj['num_neighbours']
+        self.efS = obj['efS']
+        self.space = obj['space']
+        self.labels = obj['labels']
+        self.pad_ind = obj['pad_ind']
+        self.pad_val = obj['pad_val']
+
+    def purge(self, fname):
+        # purge files from disk
+        if os.path.isfile(fname+".index"):
+            os.remove(fname+".index")
+        if os.path.isfile(fname+".metadata"):
+            os.remove(fname+".metadata")
+
+
+class ShortlistMIPS(Shortlist):
     """Get nearest labels using their embeddings
     * brute or HNSW algorithm for search
     Parameters
@@ -241,7 +328,7 @@ class ShortlistEmbeddings(Shortlist):
         print progress
     """
     def __init__(self, method='hnsw', num_neighbours=300, M=100, efC=300,
-                 efS=300, space='cosine', verbose=True, num_threads=24):
+                 efS=300, space='cosine', verbose=True, num_threads=6):
         super().__init__(method, num_neighbours, M, efC, efS, num_threads)
 
     def purge(self, fname):
@@ -285,10 +372,11 @@ class ShortlistEnsemble(object):
         weight for embedding shortlist.
         * final shortlist => gamma * kembed + (1-gamma) * kcentroid
     """
-    def __init__(self, method='hnsw', num_neighbours=500,
-                 M={'kcentroid': 100, 'kembed': 100},
-                 efC={'kcentroid': 300, 'kembed': 300},
-                 efS={'kcentroid': 300, 'kembed': 300},
+    def __init__(self, method='hnsw', num_neighbours={'ens': 500,
+                 'kcentroid': 400, 'knn': 300, 'kembed': 300},
+                 M={'kcentroid': 100, 'kembed': 100, 'knn': 50},
+                 efC={'kcentroid': 300, 'kembed': 300, 'knn': 50},
+                 efS={'kcentroid': 300, 'kembed': 300, 'knn': 100},
                  num_threads=24, space='cosine', verbose=True,
                  num_clusters=1, pad_val=-10000, gamma=0.075):
         self.kcentroid = ShortlistCentroids(
@@ -299,6 +387,11 @@ class ShortlistEnsemble(object):
             method=method, num_neighbours=efS['kembed'], M=M['kembed'],
             efC=efC['kembed'], efS=efS['kembed'], num_threads=num_threads,
             space=space, verbose=True)
+        self.knn = ShortlistInstances(
+            method=method, num_neighbours=num_neighbours['knn'], M=M['knn'],
+            efC=efC['knn'], efS=efS['knn'], num_threads=num_threads,
+            space=space, verbose=True)
+
         self.num_labels = None
         self.num_neighbours = num_neighbours
         self.pad_val = pad_val
@@ -312,22 +405,29 @@ class ShortlistEnsemble(object):
         self.num_labels = Y.shape[1]
         self.index_kcentroid.fit(X, Y)
         self.index_kembed.fit(Yf)
+        self.knn.fit(X, Y)
 
-    def merge(self, indices_kcentroid, sim_kcentroid,
-              indices_kembed, sim_kembed):
-        _shape = (len(indices_kcentroid), self.num_labels)
-        _kcentroid = csr_from_arrays(indices_kcentroid, sim_kcentroid, _shape)
-        _kembed = csr_from_arrays(indices_kembed, sim_embed, _shape)
-        temp = (gamma*_kembed + (1-gamma)*_kcentroid).tolil()
-        indices = [np.array(item, dtype=np.int64) for item in temp.rows]
-        sim = [np.array(item, dtype=np.float32) for item in temp.data]
+    def merge(self, indices, similarities, num_instances):
+        _shape = (num_instances, self.num_labels+1)
+        short_knn = csr_from_arrays(
+            indices['knn'], similarities['knn'], _shape)
+        short_kcentroid = csr_from_arrays(
+            indices['kcentroid'], similarities['kcentroid'], _shape)
+        short_kembed = csr_from_arrays(
+            indices['kembed'], similarities['kembed'], _shape)
+        short = short_kcentroid + short_kembed
+        indices, sim = topk(
+            (self.gamma*short_knn + (1-self.gamma)*short),
+            k=self.num_neighbours, pad_ind=self.pad_ind,
+            pad_val=self.pad_val, return_values=True)
         return indices, sim
 
     def query(self, data):
-        indices_kcentroid, sim_kcentroid = self.index_kcentroid.query(data)
-        indices_kembed, sim_kembed = self.index_kembed.query(data)
-        indices, sim = self.merge(
-            indices_kcentroid, sim_kcentroid, indices_kembed, sim_kembed)
+        indices, sim = {}, {}
+        indices['kcentroid'], sim['kcentroid'] = self.index_kcentroid.query(data)
+        indices['kembed'], sim['kembed'] = self.index_kembed.query(data)
+        indices['knn'], sim['knn'] = self.knn.query(data)
+        indices, sim = self.merge(indices, sim)
         return indices, sim
 
     def save(self, fname):
@@ -338,12 +438,14 @@ class ShortlistEnsemble(object):
              'gamma': self.gamma},
             open(fname+".metadata", 'wb'))
         self.kcentroid.save(fname+'.kcentroid')
+        self.knn.save(fname+'.knn')
         self.kembed.save(fname+'.kembed')
 
     def purge(self, fname):
         # purge files from disk
         self.kembed.purge(fname)
         self.kcentroid.purge(fname)
+        self.knn.purge(fname)
 
     def load(self, fname):
         obj = pickle.load(
@@ -352,8 +454,10 @@ class ShortlistEnsemble(object):
         self.pad_ind = obj['pad_ind']
         self.gamma = obj['gamma']
         self.kcentroid.load(fname+'.kcentroid')
+        self.knn.load(fname+'.knn')
         self.kembed.load(fname+'.kembed')
 
     def reset(self):
         self.kcentroid.reset()
         self.kembed.reset()
+        self.knn.reset()
