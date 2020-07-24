@@ -127,7 +127,7 @@ class Parameters(ParametersBase):
         self.parser.add_argument(
             '--loss',
             dest='loss',
-            default='bce',
+            default='cosine_embedding',
             action='store',
             type=str,
             help='Which loss to use')
@@ -235,6 +235,13 @@ class Parameters(ParametersBase):
             action='store',
             type=float,
             help='momentum')
+        self.parser.add_argument(
+            '--margin',
+            dest='margin',
+            default=0.8,
+            action='store',
+            type=float,
+            help='margin in contrastive or triplet loss')
         self.parser.add_argument(
             '--w',
             dest='weight_decay',
@@ -370,6 +377,12 @@ class Parameters(ParametersBase):
             type=bool,
             help='Shuffle data during training!')
         self.parser.add_argument(
+            '--init',
+            action='store',
+            default='random',
+            type=str,
+            help='Initialization: pretrained/random/intermediate')
+        self.parser.add_argument(
             '--devices',
             action='append',
             default=['cuda:0'],
@@ -387,6 +400,11 @@ class Parameters(ParametersBase):
             '--update_shortlist',
             action='store_true',
             help='Update shortlist while predicting'
+        )
+        self.parser.add_argument(
+            '--save_intermediate',
+            action='store_true',
+            help='Save intermediate model'
         )
         self.parser.add_argument(
             '--use_aux_embeddings',

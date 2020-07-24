@@ -211,13 +211,12 @@ class CosineEmbeddingLoss(_Loss):
         useful when some index has to be used as padding index
     """
 
-    def __init__(self, margin=0.8, reduction='mean', pos_weight=None):
-        super(CosineEmbeddingLoss, self).__init__(
-            size_average, reduce, reduction)
+    def __init__(self, margin=0.8, reduction='mean', pos_weight=1.0):
+        super(CosineEmbeddingLoss, self).__init__(reduction=reduction)
         self.margin = margin
         self.pos_weight = pos_weight
 
-    def forward(self, input, target):
+    def forward(self, input, target, mask=None):
         """
         Arguments:
         ---------
@@ -234,14 +233,9 @@ class CosineEmbeddingLoss(_Loss):
         loss: torch.FloatTensor
             dimension is defined based on reduction
         """
-        loss = torch.where(target == 1, 1-input,
+        loss = torch.where(target > 0, (1-input) * self.pos_weight,
                            torch.max(
                                torch.zeros_like(input), input - self.margin))
-        if self.pos_weight is not None:
-            pos_mask = torch.where(target == 1,
-                                   self.pos_weight*torch.ones_like(input),
-                                   torch.ones_like(input))
-            loss = loss * pos_mask
         loss = self._mask_at_pad(loss)
         loss = self._mask(loss, mask)
         return self._reduce(loss)
