@@ -3,18 +3,18 @@ use_post=0
 aux_threshold=-1
 topk=200
 embedding_dims=300
-dlr_factor=0.5
+dlr_factor=0.9
 num_labels=316053
 A=0.6
 B=2.6
 aux_method=2
 ns_method='kcentroid'
 
-lr_aux=(0.02)
-num_epochs_aux=25
+lr_aux=(0.005)
+num_epochs_aux=50
 num_centroids_aux=1
-batch_size_aux=255
-dlr_step_aux=14
+batch_size_aux=4096
+dlr_step_aux=30
 
 
 lr_org=(0.002)

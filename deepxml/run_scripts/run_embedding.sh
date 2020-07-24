@@ -16,12 +16,12 @@ topk=${14}
 shortlist_method=${16}
 seed=${17}
 extra_params="${18}"
+init='random'
 data_dir="${work_dir}/data"
 current_working_dir=$(pwd)
 docs=("trn" "tst")
 
-echo -e "\nUsing pre-trained embeddings."
-embedding_file="fasttextB_embeddings_${embedding_dims}d.npy"
+embedding_file="fasttextB_embeddings_${embedding_dims}d.yf.npy"
 
 stats=`python3 -c "import sys, json; print(json.load(open('${temp_model_data}/aux_stats.json'))['${quantile}'])"` 
 stats=($(echo $stats | tr ',' "\n"))
@@ -46,6 +46,7 @@ DEFAULT_PARAMS="--dataset ${dataset} \
                 --top_k $topk \
                 --seed ${seed} \
                 --shortlist_method random \
+                --share_weights \
                 --model_fname ${MODEL_NAME} ${extra_params} \
                 --get_only knn clf"
 
@@ -55,6 +56,11 @@ TRAIN_PARAMS="  --trans_method_document ${current_working_dir}/embedding.json \
                 --lr $learning_rate \
                 --num_nbrs 1 \
                 --model_method embedding \
+                --num_workers 6 \
+                --ann_threads 8 \
+                --validate_after 20 \
+                --validate \
+                --init ${init} \
                 --dlr_factor $dlr_factor \
                 --dlr_step $dlr_step \
                 --batch_size $batch_size \

@@ -74,9 +74,8 @@ class Embedding(torch.nn.Module):
         """
             Reset weights
         """
-        torch.nn.init.xavier_uniform_(self.weight.data, gain=torch.nn.init.calculate_gain('relu'))
-        # stdv = 1. / math.sqrt(self.weight.size(1))
-        # self.weight.data.uniform_(-stdv, stdv)
+        torch.nn.init.xavier_uniform_(
+            self.weight.data, gain=torch.nn.init.calculate_gain('relu'))
         if self.padding_idx is not None:
             self.weight.data[self.padding_idx].fill_(0)
 

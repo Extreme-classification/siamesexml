@@ -1,13 +1,30 @@
 {
-    "transform_coarse": {
-        "order": ["relu", "dropout"],
-        "relu": {},
-        "dropout": {
-            "p": 0.5
+    "transform_coarse_doc": {
+        "order": ["astec"],
+        "astec": {
+            "vocabulary_dims": "#ARGS.vocabulary_dims_document;",
+            "embedding_dims": "#ARGS.embedding_dims;",
+            "dropout": 0
         }
     },
-    "transform_fine": {
+
+    "transform_coarse_lbl": {
+        "order": ["astec"],
+        "astec": {
+            "vocabulary_dims": "#ARGS.vocabulary_dims_label;",
+            "embedding_dims": "#ARGS.embedding_dims;",
+            "dropout": 0
+        }
+    },
+
+    "transform_fine_doc": {
+        "order": ["identity"],
+        "identity": {}
+    },
+
+    "transform_fine_lbl": {
         "order": ["identity"],
         "identity": {}
     }
+
 }
