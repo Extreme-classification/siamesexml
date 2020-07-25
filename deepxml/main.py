@@ -82,6 +82,7 @@ def train(model, params):
         normalize_features=params.normalize,
         normalize_labels=params.nbn_rel,
         shuffle=params.shuffle,
+        feature_type=params.feature_type,
         validate=params.validate,
         beta=params.beta,
         init_epoch=params.last_epoch,
@@ -319,7 +320,7 @@ def main(params):
     """
     if params.mode == 'train':
         # Use last index as padding label
-        if params.use_shortlist:
+        if params.network_type == 'shortlist':
             params.label_padding_index = params.num_labels
         net = construct_network(params)
         if params.init == 'inermediate':

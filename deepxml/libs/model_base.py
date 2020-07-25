@@ -11,7 +11,7 @@ import numpy as np
 import xclib.evaluation.xc_metrics as xc_metrics
 import sys
 import libs.utils as utils
-from .dataset import construct_dataset, DatasetDense, DatasetSparse
+from .dataset import construct_dataset
 from .collate_fn import construct_collate_fn
 from .tracking import Tracking
 import torch.utils.data
@@ -406,7 +406,7 @@ class ModelBase(object):
             embeddings.flush()
         return embeddings
 
-    def get_embeddings(self, data_dir=None, encoder=None, fname=None,
+    def get_embeddings(self, encoder=None, data_dir=None, fname=None,
                        data=None, batch_size=1024, num_workers=6,
                        normalize=False, indices=None, fname_out=None,
                        return_coarse=False, feature_type='sparse'):

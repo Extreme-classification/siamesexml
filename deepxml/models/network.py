@@ -220,110 +220,6 @@ class DeepXMLf(DeepXMLBase):
         return s
 
 
-class DeepXMLs(DeepXMLBase):
-    """DeepXMLt: DeepXML architecture to be trained with
-                 a label shortlist
-    * Allows additional transform layer for features
-    """
-
-    def __init__(self, params):
-        self.num_labels = params.num_labels
-        self.num_clf_partitions = params.num_clf_partitions
-        self.label_padding_index = params.label_padding_index
-        transform_config_dict = transform_layer.fetch_json(
-            params.trans_method, params)
-        trans_config_coarse = transform_config_dict['transform_coarse']
-        super(DeepXMLs, self).__init__(trans_config_coarse)
-        trans_config_fine = transform_config_dict['transform_fine']
-        self.transform_fine = self._construct_transform(
-            trans_config_fine)
-
-    def save_intermediate_model(self, fname):
-        torch.save(self.transform.state_dict(), fname)
-
-    def load_intermediate_model(self, fname):
-        self.transform.load_state_dict(torch.load(fname))
-
-    def encode(self, x, x_ind=None, return_coarse=False):
-        """Forward pass
-        * Assumes features are dense if x_ind is None
-
-        Arguments:
-        -----------
-        x: torch.FloatTensor
-            (sparse features) contains weights of features as per x_ind or
-            (dense features) contains the dense representation of a point
-        x_ind: torch.LongTensor or None, optional (default=None)
-            contains indices of features (sparse features)
-        return_coarse: boolean, optional (default=False)
-            Return coarse features or not
-
-        Returns
-        -------
-        out: logits for each label
-        """
-        encoding = super().encode((x, x_ind))
-        return encoding if return_coarse else self.transform_fine(encoding)
-
-    def forward(self, batch_data):
-        """Forward pass
-
-        Arguments:
-        -----------
-        batch_data: dict
-            * 'X': torch.FloatTensor
-                feature weights for given indices or dense rep.
-            * 'X_ind': torch.LongTensor
-                feature indices (LongTensor) or None
-            * 'Y_s': torch.LongTensor
-                indices of labels to pick for each document
-
-        Returns
-        -------
-        out: logits for each label in the shortlist
-        """
-        return self.classifier(
-            self.encode(batch_data['X'], batch_data['X_ind']),
-            batch_data['Y_s'])
-
-    def _construct_classifier(self):
-        return linear_layer.SparseLinear(
-            input_size=self.representation_dims,
-            output_size=self.num_labels + offset,
-            padding_idx=self.label_padding_index,
-            bias=True)
-
-    def to(self):
-        """Send layers to respective devices
-        """
-        self.transform_fine.to()
-        super().to()
-
-    def initialize_classifier(self, weight, bias=None):
-        """Initialize classifier from existing weights
-
-        Arguments:
-        -----------
-        weight: numpy.ndarray
-        bias: numpy.ndarray or None, optional (default=None)
-        """
-        self.classifier.weight.data.copy_(torch.from_numpy(weight))
-        if bias is not None:
-            self.classifier.bias.data.copy_(
-                torch.from_numpy(bias).view(-1, 1))
-
-    def get_clf_weights(self):
-        """Get classifier weights
-        """
-        return self.classifier.get_weights()
-
-    def __repr__(self):
-        s = f"{self.transform}\n"
-        s += f"(Transform fine): {self.transform_fine}"
-        s += f"\n(Classifier): {self.classifier}\n"
-        return s
-
-
 class DeepXMLpp(nn.Module):
     """
     DeepXML++ to embed document and labels together
@@ -490,14 +386,6 @@ class DeepXMLpp(nn.Module):
             for name, param in self.named_parameters(recurse=recurse):
                 yield param
 
-    def __repr__(self):
-        s = f"{self.__class__.__name__} (Weights shared: {self.share_weights})"
-        s += f"\n(DocNet): {self.document_net}\n"
-        s += f"(Transform fine Doc): {self.transform_fine_document} \n"
-        s += f"(LabelNet): {self.label_net}\n"
-        s += f"(Transform fine Label): {self.transform_fine_label} \n"
-        return s
-
     def _construct_transform(self, trans_config):
         return transform_layer.Transform(
             transform_layer.get_functions(trans_config))
@@ -526,3 +414,82 @@ class DeepXMLpp(nn.Module):
                 continue
             out[k] = v
         return out
+
+    def __repr__(self):
+        s = f"{self.__class__.__name__} (Weights shared: {self.share_weights})"
+        s += f"\n(DocNet): {self.document_net}\n"
+        s += f"(Transform fine Doc): {self.transform_fine_document} \n"
+        s += f"(LabelNet): {self.label_net}\n"
+        s += f"(Transform fine Label): {self.transform_fine_label} \n"
+        return s
+
+
+class DeepXMLs(DeepXMLpp):
+    """DeepXMLt: DeepXML architecture to be trained with
+                 a label shortlist
+    * Allows additional transform layer for features
+    """
+
+    def __init__(self, params):
+        self.num_labels = params.num_labels
+        self.label_padding_index = params.label_padding_index
+        super(DeepXMLs, self).__init__(params)
+        self.classifier = self._construct_classifier()
+
+    def forward(self, batch_data):
+        """Forward pass
+
+        Arguments:
+        -----------
+        batch_data: dict
+            * 'X': torch.FloatTensor
+                feature weights for given indices or dense rep.
+            * 'X_ind': torch.LongTensor
+                feature indices (LongTensor) or None
+            * 'Y_s': torch.LongTensor
+                indices of labels to pick for each document
+
+        Returns
+        -------
+        out: logits for each label in the shortlist
+        """
+        return self.classifier(
+            self.encode_document(batch_data['X'], batch_data['X_ind']),
+            batch_data['Y_s'])
+
+    def _construct_classifier(self):
+        offset = 1 if self.label_padding_index is not None else 0
+        return linear_layer.SparseLinear(
+            input_size=self.representation_dims,
+            output_size=self.num_labels + offset,
+            padding_idx=self.label_padding_index,
+            bias=True)
+
+    def to(self):
+        """Send layers to respective devices
+        """
+        self.classifier.to()
+        super().to()
+
+    def initialize_classifier(self, weight, bias=None):
+        """Initialize classifier from existing weights
+
+        Arguments:
+        -----------
+        weight: numpy.ndarray
+        bias: numpy.ndarray or None, optional (default=None)
+        """
+        self.classifier.weight.data.copy_(torch.from_numpy(weight))
+        if bias is not None:
+            self.classifier.bias.data.copy_(
+                torch.from_numpy(bias).view(-1, 1))
+
+    def get_clf_weights(self):
+        """Get classifier weights
+        """
+        return self.classifier.get_weights()
+
+    def __repr__(self):
+        s = f"{super().__repr__()}"
+        s += f"\n(Classifier): {self.classifier}\n"
+        return s
