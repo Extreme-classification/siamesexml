@@ -239,3 +239,64 @@ class CosineEmbeddingLoss(_Loss):
         loss = self._mask_at_pad(loss)
         loss = self._mask(loss, mask)
         return self._reduce(loss)
+    
+    
+    class TripletMarginLossOHNM(_Loss):
+    r""" Triplet Margin Loss with Online Hard Negative Mining 
+
+    Arguments:
+    ----------
+    weight: torch.Tensor or None, optional (default=None))
+        a manual rescaling weight given to the loss of each batch element.
+        If given, has to be a Tensor of size batch_size
+    reduction: string, optional (default='mean')
+        Specifies the reduction to apply to the output:
+        * 'none': no reduction will be applied
+        * 'mean' or 'sum': mean or sum of loss terms
+    pos_weight: float or None, optional (default=None)
+        weight of loss with positive target
+    pad_ind: int/int64 or None (default=None)
+        ignore loss values at this index
+        useful when some index has to be used as padding index
+    """
+
+    def __init__(self, margin=0.8, reduction='mean'):
+        super(TripletMarginLossOHNM, self).__init__(reduction=reduction)
+        self.margin = margin
+
+    def forward(self, doc_embeddings, label_embeddings, selection):
+        """
+        Arguments:
+        ---------
+        doc_embeddings: torch.FloatTensor
+            real number matrix of size: batch_size x embedding dimension
+            embedding of documents in minibatch
+        label_embeddings: torch.FloatTensor
+            real number matrix of size: batch_size x embedding dimension
+            embedding of positive labels in minibatch corresponding to each document
+        selection: torch.FloatTensor
+            0/1 matrix of size batch_size x batch_size
+            (i, j)th entry is 1 if label j is positive for document i else 0
+
+        Returns:
+        -------
+        loss: torch.FloatTensor
+            dimension is defined based on reduction
+        """
+        
+        similarities = torch.min(doc_embeddings @ label_embeddings.T, 1 - selection)
+        _, indices = torch.topk(similarities, largest=True, dim=1, k=1)
+        negative_label_embeddings = label_embeddings[indices[:, 0]]
+        
+        sim_p = F.cosine_similarity(doc_embeddings, label_embeddings, dim = 1, eps = self._eps)
+        sim_n = F.cosine_similarity(doc_embeddings, negative_label_embeddings, dim = 1, eps = self._eps)
+        
+        loss = torch.max(torch.zeros_like(sim_p), sim_n - sim_p + margin)
+
+        if (self._reduction == "mean"):
+            reduced_loss = loss.mean()
+        else:
+            reduced_loss = loss.sum()
+            
+        return reduced_loss
+
