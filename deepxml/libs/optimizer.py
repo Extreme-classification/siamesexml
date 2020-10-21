@@ -153,7 +153,7 @@ class Optimizer(object):
 
     def get_params(self, net):
         self.net_params = {'sparse': [], 'dense': []}
-        for key, val in self._modules(net):
+        for _, val in self._modules(net):
             p, s = self._parameters(val)
             self._get_params(p, s, self.net_params)
         return [self.net_params['sparse'], self.net_params['dense']], \

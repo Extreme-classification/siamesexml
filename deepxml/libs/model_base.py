@@ -137,7 +137,6 @@ class ModelBase(object):
         """
             Training step
         """
-        from tqdm import tqdm
         self.net.train()
         torch.set_grad_enabled(True)
         num_batches = data_loader.dataset.num_instances//data_loader.batch_size
@@ -198,9 +197,10 @@ class ModelBase(object):
             self.tracking.train_time = self.tracking.train_time + \
                 batch_train_end_time - batch_train_start_time
 
-            self.logger.info("Epoch: {}, loss: {}, time: {} sec".format(
-                epoch, tr_avg_loss,
-                batch_train_end_time - batch_train_start_time))
+            self.logger.info(
+                "Epoch: {:d}, loss: {:.6f}, time: {:.2f} sec".format(
+                    epoch, tr_avg_loss,
+                    batch_train_end_time - batch_train_start_time))
             if validation_loader is not None and epoch % validate_after == 0:
                 val_start_t = time.time()
                 predicted_labels, val_avg_loss = self._validate(
@@ -217,14 +217,15 @@ class ModelBase(object):
                 self.logger.info("Model saved after epoch: {}".format(epoch))
                 self.save_checkpoint(model_dir, epoch+1)
                 self.tracking.last_saved_epoch = epoch
-                self.logger.info("P@1: {}, loss: {}, time: {} sec".format(
-                    _prec[0]*100, val_avg_loss, val_end_t-val_start_t))
+                self.logger.info(
+                    "P@1: {:.2f}, loss: {:.6f}, time: {:.2f} sec".format(
+                        _prec[0]*100, val_avg_loss, val_end_t-val_start_t))
             self.tracking.last_epoch += 1
         self.save_checkpoint(model_dir, epoch+1)
         self.tracking.save(os.path.join(result_dir, 'training_statistics.pkl'))
         self.logger.info(
-            "Training time: {} sec, Validation time: {} sec"
-            ", Shortlist time: {} sec, Model size: {} MB".format(
+            "Training time: {:.2f} sec, Validation time: {:.2f} sec"
+            ", Shortlist time: {:.2f} sec, Model size: {:.2f} MB".format(
                 self.tracking.train_time, self.tracking.validation_time,
                 self.tracking.shortlist_time, self.model_size))
 
@@ -310,9 +311,11 @@ class ModelBase(object):
         _res = ""
         if isinstance(acc, dict):
             for key, val in acc.items():
-                _res += "{}: {} ".format(key, val[0]*100)
+                _val = ','.join(map(lambda x: '%0.2f' % (x*100), val[0]))
+                _res += "({}): {} ".format(key, _val)
         else:
-            _res = "clf: {}".format(acc[0]*100)
+            _val = ','.join(map(lambda x: '%0.2f' % (x*100), acc[0]))
+            _res = "(clf): {}".format(_val)
         return _res
 
     def predict(self, data_dir, dataset, data=None,
@@ -350,8 +353,8 @@ class ModelBase(object):
         acc = self.evaluate(dataset.labels.data, predicted_labels)
         _res = self._format_acc(acc)
         self.logger.info(
-            "Prediction time (total): {} sec.,"
-            "Prediction time (per sample): {} msec., P@k(%): {}".format(
+            "Prediction time (total): {:.2f} sec.,"
+            "Prediction time (per sample): {:.2f} msec., P@k(%): {:s}".format(
                 prediction_time,
                 prediction_time*1000/data_loader.dataset.num_instances, _res))
         return predicted_labels
@@ -473,9 +476,6 @@ class ModelBase(object):
             os.path.join(model_dir, model_dir, fname_net))
         # Append Padding classifier if shapes do not match.
         # Distributed classifier not tested for now
-        _output_size = self.net.classifier.output_size
-        self.logger.info(utils.append_padding_classifier(
-            state_dict, _output_size))
         self.net.load_state_dict(state_dict)
 
     def purge(self, model_dir):
@@ -500,14 +500,6 @@ class ModelBase(object):
                 acc[key] = self._evaluate(true_labels, val)
             return acc
 
-    def get_size(self):
-        total = 0
-        component_size = {}
-        for key, val in self.net.__dict__['_modules'].items():
-            num_params = np.sum([p.numel()
-                                 for p in val.parameters() if p.requires_grad])
-            _size = num_params*4/(1024*1024*1024)
-            component_size[key] = _size
-            total += _size
-        return total, component_size
-        
+    @property
+    def model_size(self):
+        return self.net.model_size

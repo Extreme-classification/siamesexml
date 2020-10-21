@@ -46,7 +46,6 @@ def load_emeddings(params):
             embeddings = np.load(fname)
         else:
             raise FileNotFoundError(f"{fname} not found!")
-            exit()
     if params.feature_indices is not None:
         indices = np.genfromtxt(params.feature_indices, dtype=np.int32)
         embeddings = embeddings[indices, :]
@@ -111,19 +110,17 @@ def get_document_embeddings(model, params, _save=True):
     if params.huge_dataset:
         fname_temp = os.path.join(
             params.result_dir, params.out_fname + ".memmap.npy")
-    doc_embeddings = model.get_document_embeddings(
-        data_dir=params.data_dir,
-        dataset=params.dataset,
-        fname_features=params.ts_feat_fname,
-        fname_labels=params.ts_label_fname,
-        data={'X': None, 'Y': None, 'Yf': None},
+    doc_embeddings = model.get_embeddings(
+        data_dir=os.path.join(params.data_dir, params.dataset),
+        fname=params.ts_feat_fname,
+        data=None,
         fname_out=fname_temp,
+        feature_type=params.feature_type,
         return_coarse=params.use_coarse_for_shorty,
-        keep_invalid=params.keep_invalid,
         batch_size=params.batch_size,
-        normalize_features=params.normalize,
+        normalize=params.normalize,
         num_workers=params.num_workers,
-        feature_indices=params.feature_indices)
+        indices=params.feature_indices)
     fname = os.path.join(params.result_dir, params.out_fname)
     if _save:  # Save
         np.save(fname, doc_embeddings)
@@ -271,6 +268,27 @@ def construct_shortlist(params):
             efC=params.efC,
             efS=params.efS,
             num_threads=params.ann_threads)
+    elif params.shortlist_method == 'ensemble':
+        shorty = shortlist.ShortlistEnsemble(
+            method=params.ann_method,
+            num_neighbours={'ens': params.num_nbrs,
+                'kcentroid': params.efS,
+                'knn': params.efS,
+                'kembed': params.efS},
+            M={'kcentroid': params.M,
+                'kembed': params.M,
+                'knn': params.M//2},
+            efC={'kcentroid': params.efC,
+                'kembed': params.efC,
+                'knn': params.efC//6},
+            efS={'kcentroid': params.efS,
+                'kembed': params.efS,
+                'knn': params.efS//3},
+            num_threads=params.ann_threads,
+            verbose=True,
+            use_knn=True,
+            num_clusters=params.num_centroids, 
+            gamma=0.25)
     else:
         raise NotImplementedError("Not yet implemented!")
     return shorty
@@ -307,10 +325,17 @@ def construct_loss(params, pos_weight=2.0):
     _pad_ind = None if params.use_shortlist else params.label_padding_index
     if params.loss == 'bce':
         return loss.BCEWithLogitsLoss(
-            reduction=_reduction, pad_ind=_pad_ind, pos_weight=pos_weight)
+            reduction=_reduction,
+            pad_ind=_pad_ind,
+            pos_weight=None)
+    if params.loss == 'triplet_margin_onm':
+        return loss.TripletMarginLossOHNM(
+            reduction=_reduction,
+            margin=params.margin)
     else:
         return loss.CosineEmbeddingLoss(
-            reduction=_reduction, pos_weight=pos_weight,
+            reduction=_reduction,
+            pos_weight=pos_weight,
             margin=params.margin)
 
 
@@ -323,7 +348,7 @@ def main(params):
         if params.network_type == 'shortlist':
             params.label_padding_index = params.num_labels
         net = construct_network(params)
-        if params.init == 'inermediate':
+        if params.init == 'intermediate':
             print("Loading intermediate representation.")
             net.load_intermediate_model(
                 os.path.join(os.path.dirname(params.model_dir), "Z.pkl"))
@@ -364,7 +389,6 @@ def main(params):
             opt_type=params.optim,
             learning_rate=params.learning_rate,
             momentum=params.momentum,
-            freeze_embeddings=params.freeze_embeddings,
             weight_decay=params.weight_decay)
         shorty = construct_shortlist(params)
         model = construct_model(params, net, criterion, opt, shorty)

@@ -7,6 +7,7 @@ import models.linear_layer as linear_layer
 import torch.nn.functional as F
 from collections import OrderedDict
 import pickle
+import os
 
 
 __author__ = 'KD'
@@ -254,6 +255,9 @@ class DeepXMLpp(nn.Module):
 
     def _create_shared_net(self):
         self.label_net = self.document_net
+        
+    def encode(self, x, x_ind=None, return_coarse=False):
+        return self.encode_document(x, x_ind, return_coarse)
 
     def encode_document(self, x, x_ind=None, return_coarse=False):
         """Forward pass

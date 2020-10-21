@@ -106,7 +106,7 @@ def construct_selection(sel_pos_indices, pos_indices):
     # Will use numpy; pytorch intersect1d is weird
     batch_size = pos_indices.shape[0]
     selection = torch.zeros((batch_size, batch_size))
-    for (i, item) in enumerate(pos_indices):
+    for (i, _) in enumerate(pos_indices):
         intersection = np.intersect1d(sel_pos_indices, pos_indices[i])
         result = np.zeros(batch_size)
         for idx in intersection:

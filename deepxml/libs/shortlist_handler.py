@@ -26,7 +26,7 @@ def construct_handler(shortlist_type, num_labels, shortlist=None,
             label_mapping)
     else:
         raise NotImplementedError(
-            "Unknown shortlist method: {}!".format(shortlist_method))
+            "Unknown shortlist method: {}!".format(shortlist_type))
 
 
 class ShortlistHandlerBase(object):
@@ -253,11 +253,11 @@ class ShortlistHandlerHybrid(ShortlistHandlerBase):
         add these many random labels
     """
 
-    def __init__(self, num_labels, model_dir='', num_clf_partitions=1,
-                 mode='train', size_shortlist=-1, in_memory=True,
-                 label_mapping=None, _corruption=200):
-        super().__init__(num_labels, None, model_dir, num_clf_partitions,
-                         mode, size_shortlist, label_mapping)
+    def __init__(self, num_labels, model_dir='', mode='train',
+                size_shortlist=-1, in_memory=True,
+                label_mapping=None, _corruption=200):
+        super().__init__(num_labels, None, model_dir, mode,
+                         size_shortlist, label_mapping)
         self.in_memory = in_memory
         self._create_shortlist()
         self.shortlist_dynamic = NegativeSampler(num_labels, _corruption)
