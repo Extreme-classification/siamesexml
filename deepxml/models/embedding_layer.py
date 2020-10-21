@@ -78,6 +78,7 @@ class Embedding(torch.nn.Module):
             self.weight.data, gain=torch.nn.init.calculate_gain('relu'))
         if self.padding_idx is not None:
             self.weight.data[self.padding_idx].fill_(0)
+            self.weight.data[-1].fill_(0) # UNK token
 
     def to(self):
         super().to(self.device)
@@ -125,9 +126,9 @@ class Embedding(torch.nn.Module):
 
     def from_pretrained(self, embeddings):
         # first index is treated as padding index
-        assert embeddings.shape[0] == self.num_embeddings-1, \
+        assert embeddings.shape[0] == self.num_embeddings-2, \
             "Shapes doesn't match for pre-trained embeddings"
-        self.weight.data[1:, :] = torch.from_numpy(embeddings)
+        self.weight.data[1:-1, :] = torch.from_numpy(embeddings)
 
     def get_weights(self):
         return self.weight.detach().cpu().numpy()[1:, :]

@@ -49,10 +49,11 @@ class Linear(nn.Module):
     def reset_parameters(self):
         """Initialize vectors
         """
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        torch.nn.init.xavier_uniform_(
+            self.weight.data,
+            gain=torch.nn.init.calculate_gain('relu'))
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias.data.fill_(0)
 
     def get_weights(self):
         """Get weights as numpy array
@@ -115,28 +116,32 @@ class SparseLinear(Linear):
         out: torch.Tensor
             logits for each label in provided shortlist
         """
-        embed = embed.to(self.device)
+        embed = F.normalize(embed.to(self.device), dim=1)
         shortlist = shortlist.to(self.device)
         short_weights = F.embedding(shortlist,
                                     self.weight,
                                     sparse=self.sparse,
                                     padding_idx=self.padding_idx)
+        short_weights = F.normalize(short_weights, dim=2)
         out = torch.matmul(embed.unsqueeze(1), short_weights.permute(0, 2, 1))
+        """
         if self.bias is not None:
             short_bias = F.embedding(shortlist,
                                      self.bias,
                                      sparse=self.sparse,
                                      padding_idx=self.padding_idx)
             out = out + short_bias.permute(0, 2, 1)
+        """
         return out.squeeze()
 
     def reset_parameters(self):
         """Initialize weights vectors
         """
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        torch.nn.init.xavier_uniform_(
+            self.weight.data,
+            gain=torch.nn.init.calculate_gain('relu'))
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias.data.fill_(0)
         if self.padding_idx is not None:
             self.weight.data[self.padding_idx].fill_(0)
 
