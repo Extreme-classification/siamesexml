@@ -28,10 +28,10 @@ clean_up(){
 evaluate() {
     # $1 fname
     # $2 beta
-    ./run_base.sh "evaluate" ${dataset} "${work_dir}" ${version} ${model_type} "${1}" $A $B "${save_predictions} ${2}"
+    ./run_base.sh "evaluate" ${dataset} "${work_dir}" ${version} ${model_type} "${tst_lbl_file}" "${1}" "${filter_mapping}" $A $B ${save_predictions} "${2}"
 }
 
-work_dir="/mnt/XC"
+work_dir="${HOME}/scratch/kd"
 data_dir="${work_dir}/data/${dataset}"
 temp_model_data="${data_dir}/deepxml.aux/${aux_threshold}.${seed}"
 
@@ -42,6 +42,7 @@ lbl_ft_file="${data_dir}/lbl_X_Xf.txt"
 trn_lbl_file="${data_dir}/trn_X_Y.txt"
 tst_ft_file="${data_dir}/tst_X_Xf.txt"
 tst_lbl_file="${data_dir}/tst_X_Y.txt"
+filter_mapping="${data_dir}/filter_labels_test.txt"
 mkdir -p "${temp_model_data}"
 
 convert() {
@@ -83,7 +84,6 @@ models_dir="${work_dir}/models/$model_type/${dataset}/v_${version}"
 
 echo -e "\nRunning DeepXML++\n"
 run "embedding" $version "aux" "--aux_mapping ${temp_model_data}/aux_mapping.txt"
-exit
 run "shortlist" $version "org" ""
 cp "$results_dir/org/test_predictions_clf.npz" "$results_dir/test_predictions_clf.npz"
 cp "$results_dir/org/test_predictions_knn.npz" "$results_dir/test_predictions_knn.npz"

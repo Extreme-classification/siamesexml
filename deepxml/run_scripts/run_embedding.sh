@@ -16,12 +16,20 @@ topk=${14}
 shortlist_method=${16}
 seed=${17}
 extra_params="${18}"
-init='random'
+init='pretrained'
 data_dir="${work_dir}/data"
 current_working_dir=$(pwd)
 docs=("trn" "tst")
 
-embedding_file="fasttextB_embeddings_${embedding_dims}d.yf.npy"
+trn_ft_file="trn_X_Xf.txt"
+trn_lbl_file="trn_X_Y.txt"
+tst_ft_file="tst_X_Xf.txt"
+tst_lbl_file="tst_X_Y.txt"
+lbl_ft_file="lbl_X_Xf.txt"
+
+extra_params="${extra_params} --normalize --feature_type sparse"
+
+embedding_file="fasttextB_embeddings_${embedding_dims}d.npy"
 
 stats=`python3 -c "import sys, json; print(json.load(open('${temp_model_data}/aux_stats.json'))['${quantile}'])"` 
 stats=($(echo $stats | tr ',' "\n"))
@@ -36,13 +44,13 @@ DEFAULT_PARAMS="--dataset ${dataset} \
                 --embeddings $embedding_file \
                 --embedding_dims ${embedding_dims} \
                 --num_epochs $num_epochs \
-                --tr_feat_fname trn_X_Xf.txt \
-                --tr_label_fname trn_X_Y.txt \
-                --lbl_feat_fname lbl_X_Xf.txt \
-		        --val_feat_fname tst_X_Xf.txt \
-                --val_label_fname tst_X_Y.txt \
-                --ts_feat_fname tst_X_Xf.txt \
-                --ts_label_fname tst_X_Y.txt \
+                --tr_feat_fname ${trn_ft_file} \
+                --tr_label_fname ${trn_lbl_file} \
+	        --val_feat_fname ${tst_ft_file} \
+                --val_label_fname ${tst_lbl_file} \
+                --ts_feat_fname ${tst_ft_file} \
+                --ts_label_fname ${tst_lbl_file} \
+                --lbl_feat_fname ${lbl_ft_file} \
                 --top_k $topk \
                 --seed ${seed} \
                 --shortlist_method random \
@@ -55,20 +63,21 @@ TRAIN_PARAMS="  --trans_method_document ${current_working_dir}/embedding.json \
                 --dropout 0.5 --optim Adam \
                 --lr $learning_rate \
                 --num_nbrs 1 \
+                --margin 0.2 \
+                --loss triplet_margin_onm \
                 --model_method embedding \
                 --num_workers 6 \
-                --ann_threads 8 \
-                --validate_after 20 \
+                --ann_threads 12 \
+		--save_intermediate \
+                --validate_after 30 \
                 --validate \
                 --init ${init} \
                 --dlr_factor $dlr_factor \
                 --dlr_step $dlr_step \
                 --batch_size $batch_size \
-                --normalize \
                 ${DEFAULT_PARAMS}"
 
 PREDICT_PARAMS="--model_method full \
-                --normalize \
                 --model_fname ${MODEL_NAME}\
                 --pred_fname test_predictions \
                 --out_fname predictions.txt \
@@ -77,26 +86,21 @@ PREDICT_PARAMS="--model_method full \
 
 EXTRACT_PARAMS="--dataset ${dataset} \
                 --data_dir ${work_dir}/data \
-                --normalize \
-                --model_method full \
+		--share_weights \
+		--shortlist_method  random \
+		--vocabulary_dims_document ${vocabulary_dims} \
+		--vocabulary_dims_label ${vocabulary_dims} \
+		--trans_method_document ${current_working_dir}/embedding.json \
+		--trans_method_label ${current_working_dir}/embedding.json \
+                --model_method embedding \
                 --model_fname ${MODEL_NAME}\
                 --batch_size 512 ${extra_params}"
 
 
 ./run_base.sh "train" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${TRAIN_PARAMS}"
-./run_base.sh "extract" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${EXTRACT_PARAMS} --ts_feat_fname 0 --out_fname export/wrd_emb"
-
-if [ "${quantile}" == "aux" ]
-then
-    echo -e "\nGenerating embeddings from auxiliary task."
-    cp "${work_dir}/results/DeepXML/${dataset}/v_${dir_version}/aux/export/wrd_emb.npy" "${work_dir}/models/DeepXML/${dataset}/v_${dir_version}/aux_embeddings_${embedding_dims}d.npy"
-    exit
-fi
-
-exit
 ./run_base.sh "predict" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${PREDICT_PARAMS}"
 
 for doc in ${docs[*]} 
 do 
-    ./run_base.sh "extract" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${EXTRACT_PARAMS} --ts_feat_fname ${doc}_X_Xf.txt --ts_label_fname ${doc}_X_Y.txt --out_fname export/${doc}_emb"
+    ./run_base.sh "extract" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${EXTRACT_PARAMS} --ts_feat_fname ${doc}_X_Xf.txt --out_fname export/${doc}_emb"
 done

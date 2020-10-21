@@ -4,7 +4,7 @@ aux_threshold=-1
 topk=200
 embedding_dims=300
 dlr_factor=0.75
-num_labels=316053
+num_labels=2143945
 A=0.6
 B=2.6
 aux_method=2
@@ -17,7 +17,7 @@ batch_size_aux=4096
 dlr_step_aux=30
 
 
-lr_org=(0.005)
+lr_org=(0.0005)
 num_epochs_org=20
 num_centroids_org=1
 batch_size_org=255

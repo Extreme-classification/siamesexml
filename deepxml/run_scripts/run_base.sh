@@ -6,7 +6,7 @@ train () {
         # $3 Extra Parameters
         
         log_tr_file="${2}/log_train.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --model_dir $1 \
+        python3 -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --model_dir $1 \
                                 --result_dir $2 \
                                 --mode train \
                                 ${3}| tee $log_tr_file
@@ -24,7 +24,7 @@ retrain () {
         # $14 extra params
 
         log_pred_file="${4}/log_predict.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --dataset $1 \
+        python3 -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --dataset $1 \
                                 --data_dir $2 \
                                 --model_dir $3 \
                                 --result_dir $4 \
@@ -45,7 +45,7 @@ predict () {
         # $2 model_dir
         # $3 extra params
         log_pred_file="${1}/log_predict.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --model_dir $2 \
+        python3 -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --model_dir $2 \
                                 --result_dir $1 \
                                 --mode predict \
                                 ${3} | tee $log_pred_file
@@ -57,7 +57,7 @@ extract () {
         # $2 model_dir
         # $3 extra params
         log_pred_file="${1}/log_predict.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --result_dir $1 \
+        python3 -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --result_dir $1 \
                                 --model_dir $2 \
                                 --mode extract \
                                 ${3} | tee -a $log_pred_file
@@ -70,22 +70,24 @@ retrain_w_shorty () {
         # $3 Extra Parameters
         
         log_tr_file="${2}/log_train_post.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --model_dir $1 \
+        python3 -u ${work_dir}/programs/deepxmlpp/deepxml/main.py --model_dir $1 \
                                 --result_dir $2 \
                                 --mode retrain_w_shorty \
                                 ${3}| tee $log_tr_file
 }
 
 evaluate () {
-        # $1 result_dir
-        # $2 train
-        # $3 test
-        # $4 pred_fname path
-        # $5 A
-        # $6 B
-        # $7 SAVE and BETAS
+	# $1 result dir
+        # $2 trn labels
+        # $3 target labels
+        # $4 filter labels
+        # $5 pred_fname/path
+        # $6 A
+        # $7 B
+        # $8 SAVE
+	# $9 BETAS
         log_eval_file="${1}/log_eval.txt"
-        python -u ${work_dir}/programs/deepxmlpp/deepxml/tools/evaluate.py "${2}" "${3}" "${4}" $5 $6 $7 | tee -a $log_eval_file
+        python3 -u ${work_dir}/programs/deepxmlpp/deepxml/tools/evaluate.py "${2}" "${3}" "${4}" $5 $6 $7 $8 $9 | tee -a $log_eval_file
 }
 
 
@@ -117,11 +119,15 @@ then
     predict $result_dir $model_dir "${1}"
 elif [ "${FLAG}" == "evaluate" ]
 then
-    # $1 Out_file
-    # $2 A
-    # $3 B
-    # $4 TYPE, SAVE and BETAS
-    evaluate $result_dir "${data_dir}/trn_X_Y.txt" "${data_dir}/tst_X_Y.txt" "${result_dir}/${1}" ${2} ${3} "${4}"
+    # $1 true labels
+    # $2 out file
+    # $3 filter labels
+    # $4 A
+    # $5 B
+    # $6 save
+    # $7 BETAS
+    echo "${4} ${5} ${6} ${7}"
+    evaluate $result_dir "${data_dir}/trn_X_Y.txt" "${1}" "${3}" "${result_dir}/${2}" ${4} ${5} ${6} "${7}"
 elif [ "${FLAG}" == "extract" ]
 then
     # $1 PARAMS
