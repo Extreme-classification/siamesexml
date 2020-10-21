@@ -11,7 +11,7 @@ import numba
 import math
 from operator import itemgetter
 from libs.clustering import Cluster
-from libs.utils import map_neighbors, map_centroids
+from libs.utils import map_neighbors, map_centroids, map_dense
 
 
 class Shortlist(object):
@@ -60,11 +60,11 @@ class Shortlist(object):
         else:
             print("Unknown NN method!")
 
-    def fit(self, data):
-        self.index.fit(data)
+    def fit(self, X, *args, **kwargs):
+        self.index.fit(X)
 
-    def query(self, data, *args, **kwargs):
-        indices, distances = self.index.predict(data, *args, **kwargs)
+    def query(self, X, *args, **kwargs):
+        indices, distances = self.index.predict(X, *args, **kwargs)
         return indices, 1-distances
 
     def save(self, fname):
@@ -130,21 +130,20 @@ class ShortlistCentroids(Shortlist):
         self.threshold = threshold
         self.pad_val = pad_val
 
-    def _cluster_multiple_rep(self, features, labels, label_centroids,
-                              multi_centroid_indices):
-        embedding_dims = features.shape[1]
+    def _cluster_multiple_rep(self, X, Y, label_centroids, mc_indices):
+        embedding_dims = X.shape[1]
         _cluster_obj = Cluster(
-            indices=multi_centroid_indices,
+            indices=mc_indices,
             embedding_dims=embedding_dims,
             num_clusters=self.num_clusters,
             max_iter=50, n_init=2, num_threads=-1)
-        _cluster_obj.fit(features, labels)
+        _cluster_obj.fit(X, Y)
         label_centroids = np.vstack(
             [label_centroids, _cluster_obj.predict()])
         return label_centroids
 
-    def process_multiple_rep(self, features, labels, label_centroids):
-        freq = np.array(labels.sum(axis=0)).ravel()
+    def process_multiple_rep(self, X, Y, label_centroids):
+        freq = np.array(Y.sum(axis=0)).ravel()
         if np.max(freq) > self.threshold and self.num_clusters > 1:
             self.ext_head = np.where(freq >= self.threshold)[0]
             print("Found {} super-head labels".format(len(self.ext_head)))
@@ -153,20 +152,19 @@ class ShortlistCentroids(Shortlist):
                 self.mapping = np.append(
                     self.mapping, [idx]*self.num_clusters)
             return self._cluster_multiple_rep(
-                features, labels, label_centroids, self.ext_head)
+                X, Y, label_centroids, self.ext_head)
         else:
             return label_centroids
 
-    def fit(self, features, labels, *args, **kwargs):
-        self.pad_ind = labels.shape[1]
-        label_centroids = compute_centroid(features, labels, reduction='mean')
+    def fit(self, X, Y, *args, **kwargs):
+        self.pad_ind = Y.shape[1]
+        label_centroids = compute_centroid(X, Y, reduction='mean')
         label_centroids = self.process_multiple_rep(
-            features, labels, label_centroids)
-        norms = np.sum(np.square(label_centroids), axis=1)
+            X, Y, label_centroids)
         super().fit(label_centroids)
 
-    def query(self, data, *args, **kwargs):
-        indices, sim = super().query(data, *args, **kwargs)
+    def query(self, X, *args, **kwargs):
+        indices, sim = super().query(X, *args, **kwargs)
         return self._remap(indices, sim)
 
     def _remap(self, indices, sims):
@@ -240,20 +238,20 @@ class ShortlistInstances(Shortlist):
         self.pad_ind = None
         self.pad_val = pad_val
 
-    def _remove_invalid(self, features, labels):
+    def _remove_invalid(self, X, Y):
         # Keep data points with nnz features and atleast one label
-        ind_ft = np.where(np.sum(np.square(features), axis=1) > 0)[0]
-        ind_lb = np.where(np.sum(labels, axis=1) > 0)[0]
+        ind_ft = np.where(np.sum(np.square(X), axis=1) > 0)[0]
+        ind_lb = np.where(np.sum(Y, axis=1) > 0)[0]
         ind = np.intersect1d(ind_ft, ind_lb)
-        return features[ind], labels[ind]
+        return X[ind], Y[ind]
 
-    def _as_array(self, labels):
-        n_pos_labels = list(map(len, labels))
+    def _as_array(self, Y):
+        n_pos_labels = list(map(len, Y))
         _labels = np.full(
-            (len(labels), max(n_pos_labels)),
+            (len(Y), max(n_pos_labels)),
             self.pad_ind, np.int64)
-        for ind, _lab in enumerate(labels):
-            _labels[ind, :n_pos_labels[ind]] = labels[ind]
+        for ind, _lab in enumerate(Y):
+            _labels[ind, :n_pos_labels[ind]] = Y[ind]
         return _labels
 
     def _remap(self, indices, distances):
@@ -262,14 +260,14 @@ class ShortlistInstances(Shortlist):
             self.labels, self.num_neighbours,
             self.pad_ind, self.pad_val)
 
-    def fit(self, features, labels):
-        features, labels = self._remove_invalid(features, labels)
-        self.index.fit(features)
-        self.pad_ind = labels.shape[1]
-        self.labels = self._as_array(labels.tolil().rows)
+    def fit(self, X, Y):
+        X, Y = self._remove_invalid(X, Y)
+        self.index.fit(X)
+        self.pad_ind = Y.shape[1]
+        self.labels = self._as_array(Y.tolil().rows)
 
-    def query(self, data, *args, **kwargs):
-        indices, distances = self.index.predict(data)
+    def query(self, X, *args, **kwargs):
+        indices, distances = self.index.predict(X)
         indices, similarities = self._remap(indices, distances)
         return indices, similarities
 
@@ -328,8 +326,36 @@ class ShortlistMIPS(Shortlist):
         print progress
     """
     def __init__(self, method='hnsw', num_neighbours=300, M=100, efC=300,
-                 efS=300, space='cosine', verbose=True, num_threads=6):
+                 efS=300, space='cosine', verbose=True, num_threads=16):
         super().__init__(method, num_neighbours, M, efC, efS, num_threads)
+        self.valid_indices = None
+
+    def fit(self, X, *args, **kwargs):
+        norms = np.square(X).sum(axis=1)
+        ind = np.where(norms > 0)[0]
+        if len(ind) < len(X):
+            self.valid_indices = ind
+            X = X[self.valid_indices]
+        super().fit(X)  
+
+    def query(self, X, *args, **kwargs):
+        ind, sim = super().query(X)
+        if self.valid_indices is not None:
+            ind = map_dense(ind, self.valid_indices)
+        return ind, sim
+
+    def save(self, fname):
+        metadata = {
+            'valid_indices': self.valid_indices,
+        }
+        pickle.dump(metadata, open(fname+".metadata", 'wb'))
+        super().save(fname+".index")
+
+    def load(self, fname):
+        self.index.load(fname+".index")
+        obj = pickle.load(
+            open(fname+".metadata", 'rb'))
+        self.valid_indices = obj['valid_indices']
 
     def purge(self, fname):
         # purge files from disk
@@ -378,22 +404,25 @@ class ShortlistEnsemble(object):
                  efC={'kcentroid': 300, 'kembed': 300, 'knn': 50},
                  efS={'kcentroid': 300, 'kembed': 300, 'knn': 100},
                  num_threads=24, space='cosine', verbose=True,
-                 num_clusters=1, pad_val=-10000, gamma=0.075):
+                 num_clusters=1, pad_val=-10000, gamma=0.075, 
+                 use_knn=False):
         self.kcentroid = ShortlistCentroids(
             method=method, num_neighbours=efS['kcentroid'],
             M=M['kcentroid'], efC=efC['kcentroid'], efS=efS['kcentroid'],
             num_threads=num_threads, space=space, verbose=True)
-        self.kembed = ShortlistEmbeddings(
+        self.kembed = ShortlistMIPS(
             method=method, num_neighbours=efS['kembed'], M=M['kembed'],
             efC=efC['kembed'], efS=efS['kembed'], num_threads=num_threads,
             space=space, verbose=True)
-        self.knn = ShortlistInstances(
-            method=method, num_neighbours=num_neighbours['knn'], M=M['knn'],
-            efC=efC['knn'], efS=efS['knn'], num_threads=num_threads,
-            space=space, verbose=True)
+        self.knn = None
+        if use_knn:        
+            self.knn = ShortlistInstances(
+                method=method, num_neighbours=num_neighbours['knn'], M=M['knn'],
+                efC=efC['knn'], efS=efS['knn'], num_threads=num_threads,
+                space=space, verbose=True)
 
         self.num_labels = None
-        self.num_neighbours = num_neighbours
+        self.num_neighbours = num_neighbours['ens']
         self.pad_val = pad_val
         self.pad_ind = -1
         self.gamma = gamma
@@ -403,31 +432,39 @@ class ShortlistEnsemble(object):
             "#label should match in kembed and kcentroid"
         self.pad_ind = Y.shape[1]
         self.num_labels = Y.shape[1]
-        self.index_kcentroid.fit(X, Y)
-        self.index_kembed.fit(Yf)
-        self.knn.fit(X, Y)
+        self.kcentroid.fit(X, Y)
+        self.kembed.fit(Yf)
+        if self.knn is not None:
+            self.knn.fit(X, Y)
 
     def merge(self, indices, similarities, num_instances):
         _shape = (num_instances, self.num_labels+1)
-        short_knn = csr_from_arrays(
-            indices['knn'], similarities['knn'], _shape)
         short_kcentroid = csr_from_arrays(
             indices['kcentroid'], similarities['kcentroid'], _shape)
         short_kembed = csr_from_arrays(
             indices['kembed'], similarities['kembed'], _shape)
+        #short = 0.6*short_kcentroid + 0.4*short_kembed
         short = short_kcentroid + short_kembed
-        indices, sim = topk(
-            (self.gamma*short_knn + (1-self.gamma)*short),
-            k=self.num_neighbours, pad_ind=self.pad_ind,
-            pad_val=self.pad_val, return_values=True)
+        if self.knn is not None:
+            short_knn = csr_from_arrays(
+                indices['knn'], similarities['knn'], _shape)
+            indices, sim = topk(
+                (self.gamma*short_knn + (1-self.gamma)*short),
+                k=self.num_neighbours, pad_ind=self.pad_ind,
+                pad_val=self.pad_val, return_values=True)
+        else:
+            indices, sim = topk(
+                short, k=self.num_neighbours, pad_ind=self.pad_ind,
+                pad_val=self.pad_val, return_values=True)
         return indices, sim
 
     def query(self, data):
         indices, sim = {}, {}
-        indices['kcentroid'], sim['kcentroid'] = self.index_kcentroid.query(data)
-        indices['kembed'], sim['kembed'] = self.index_kembed.query(data)
-        indices['knn'], sim['knn'] = self.knn.query(data)
-        indices, sim = self.merge(indices, sim)
+        indices['kcentroid'], sim['kcentroid'] = self.kcentroid.query(data)
+        indices['kembed'], sim['kembed'] = self.kembed.query(data)        
+        if self.knn is not None:
+            indices['knn'], sim['knn'] = self.knn.query(data)
+        indices, sim = self.merge(indices, sim, len(data))
         return indices, sim
 
     def save(self, fname):
@@ -438,14 +475,16 @@ class ShortlistEnsemble(object):
              'gamma': self.gamma},
             open(fname+".metadata", 'wb'))
         self.kcentroid.save(fname+'.kcentroid')
-        self.knn.save(fname+'.knn')
         self.kembed.save(fname+'.kembed')
+        if self.knn is not None:
+            self.knn.save(fname+'.knn')
 
     def purge(self, fname):
         # purge files from disk
         self.kembed.purge(fname)
         self.kcentroid.purge(fname)
-        self.knn.purge(fname)
+        if self.knn is not None:
+            self.knn.purge(fname)
 
     def load(self, fname):
         obj = pickle.load(
@@ -454,10 +493,19 @@ class ShortlistEnsemble(object):
         self.pad_ind = obj['pad_ind']
         self.gamma = obj['gamma']
         self.kcentroid.load(fname+'.kcentroid')
-        self.knn.load(fname+'.knn')
         self.kembed.load(fname+'.kembed')
+        if self.knn is not None:
+            self.knn.load(fname+'.knn')
 
     def reset(self):
         self.kcentroid.reset()
         self.kembed.reset()
-        self.knn.reset()
+        if self.knn is not None:
+            self.knn.reset()
+
+    @property
+    def model_size(self):
+        _size = self.kcentroid.model_size + self.kembed.model_size
+        if self.knn is not None:
+            _size = _size + self.knn.model_size
+        return _size

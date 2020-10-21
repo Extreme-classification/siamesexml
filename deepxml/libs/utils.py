@@ -258,7 +258,7 @@ def _remap_centroid_one(indices, sims, mapping):
     return unique_mapped_indices, unique_mapped_sims
 
 
-@nb.njit()
+@nb.njit(parallel=True)
 def map_centroids(indices, sims, mapping, pad_ind, pad_val):
     mapped_indices = np.full(
         indices.shape, fill_value=pad_ind, dtype=np.int64)
@@ -270,3 +270,13 @@ def map_centroids(indices, sims, mapping, pad_ind, pad_val):
         mapped_indices[i, :len(_ind)] = _ind
         mapped_sims[i, :len(_sim)] = _sim
     return mapped_indices, mapped_sims
+
+
+@nb.njit(parallel=True)
+def map_dense(ind, mapping):
+    out = np.full_like(ind, fill_value=0)
+    nr, nc = ind.shape
+    for i in nb.prange(nr):
+        for j in range(nc):
+            out[i, j] = mapping[ind[i, j]]
+    return out
