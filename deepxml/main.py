@@ -46,6 +46,7 @@ def load_emeddings(params):
             embeddings = np.load(fname)
         else:
             raise FileNotFoundError(f"{fname} not found!")
+            exit()
     if params.feature_indices is not None:
         indices = np.genfromtxt(params.feature_indices, dtype=np.int32)
         embeddings = embeddings[indices, :]
@@ -91,6 +92,7 @@ def train(model, params):
         feature_indices=params.feature_indices,
         use_coarse=params.use_coarse_for_shorty,
         label_indices=params.label_indices,
+        batch_type=params.batch_type,
         sampling_type=params.sampling_type)
     model.save(params.model_dir, params.model_fname)
 
@@ -286,7 +288,7 @@ def construct_shortlist(params):
                 'knn': params.efS//3},
             num_threads=params.ann_threads,
             verbose=True,
-            use_knn=True,
+            use_knn=False,
             num_clusters=params.num_centroids, 
             gamma=0.25)
     else:

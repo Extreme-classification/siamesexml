@@ -146,7 +146,7 @@ class DeepXMLf(DeepXMLBase):
         self.num_labels = params.num_labels
         self.num_clf_partitions = params.num_clf_partitions
         transform_config_dict = transform_layer.fetch_json(
-            params.trans_method, params)
+            params.net_config, params)
         trans_config_coarse = transform_config_dict['transform_coarse']
         super(DeepXMLf, self).__init__(trans_config_coarse)
         trans_config_fine = transform_config_dict['transform_fine']
@@ -234,11 +234,11 @@ class DeepXMLpp(nn.Module):
         self.device = torch.device(device)
         self.metric = params.metric
         transform_config_dict = transform_layer.fetch_json(
-            params.trans_method_document, params)
+            params.net_config, params)
         ts_coarse_document = transform_config_dict['transform_coarse_doc']
         ts_fine_document = transform_config_dict['transform_fine_doc']
         transform_config_dict = transform_layer.fetch_json(
-            params.trans_method_label, params)
+            params.net_config, params)
         ts_coarse_label = transform_config_dict['transform_coarse_lbl']
         ts_fine_label = transform_config_dict['transform_fine_lbl']
 

@@ -583,7 +583,7 @@ class ModelEmbedding(ModelBase):
                         feature_indices=None, label_indices=None,
                         label_feature_indices=None, size_shortlist=-1,
                         shortlist_type='static', shorty=None,
-                        _type=None, pretrained_shortlist=None):
+                        batch_type='doc', _type=None, pretrained_shortlist=None):
         """
         Create dataset as per given parameters
         """
@@ -606,6 +606,7 @@ class ModelEmbedding(ModelBase):
             label_feature_indices=label_feature_indices,
             shortlist_type=shortlist_type,
             pretrained_shortlist=pretrained_shortlist,
+            batch_type=batch_type,
             shorty=shorty)
         return _dataset
 
@@ -668,7 +669,7 @@ class ModelEmbedding(ModelBase):
             keep_invalid=False, feature_indices=None, label_indices=None,
             label_feature_indices=None, normalize_features=True,
             normalize_labels=False, validate=False, beta=0.2, use_coarse=True,
-            validate_after=30, sampling_type=None,
+            validate_after=30, batch_type='doc', sampling_type=None,
             feature_type='sparse', shortlist_type=None):
         self.logger.info("Loading training data.")
         train_dataset = self._create_dataset(
@@ -688,6 +689,7 @@ class ModelEmbedding(ModelBase):
             label_indices=label_indices,
             size_shortlist=1,
             _type='embedding',
+            batch_type=batch_type,
             shorty=self.shorty
             )
         train_loader = self._create_data_loader(
@@ -719,6 +721,7 @@ class ModelEmbedding(ModelBase):
                 label_indices=label_indices,
                 size_shortlist=1,
                 _type='embedding',
+                batch_type='doc',
                 shorty=self.shorty
                 )
             validation_loader = self._create_data_loader(

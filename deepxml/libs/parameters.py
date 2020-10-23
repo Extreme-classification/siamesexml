@@ -34,20 +34,6 @@ class Parameters(ParametersBase):
             type=int,
             help='seed values')
         self.parser.add_argument(
-            '--trans_method_document',
-            dest='trans_method_document',
-            default='non_linear',
-            type=str,
-            action='store',
-            help='which network to use for document')
-        self.parser.add_argument(
-            '--trans_method_label',
-            dest='trans_method_label',
-            default='non_linear',
-            type=str,
-            action='store',
-            help='which network to use for label')
-        self.parser.add_argument(
             '--lr',
             dest='learning_rate',
             default=0.1,
@@ -68,6 +54,12 @@ class Parameters(ParametersBase):
             action='store',
             type=int,
             help='Last saved model at this epoch!')
+        self.parser.add_argument(
+            '--net_config',
+            dest='net_config',
+            type=str,
+            action='store',
+            help='Network configuration (as a json file)')
         self.parser.add_argument(
             '--last_epoch',
             dest='last_epoch',
@@ -250,13 +242,6 @@ class Parameters(ParametersBase):
             type=float,
             help='weight decay parameter')
         self.parser.add_argument(
-            '--dropout',
-            dest='dropout',
-            default=0.5,
-            action='store',
-            type=float,
-            help='Dropout')
-        self.parser.add_argument(
             '--optim',
             dest='optim',
             default='SGD',
@@ -320,12 +305,12 @@ class Parameters(ParametersBase):
             action='store',
             help='weight of classifier')
         self.parser.add_argument(
-            '--res_init',
-            dest='res_init',
-            default='eye',
+            '--batch_type',
+            dest='batch_type',
+            default='doc',
             type=str,
             action='store',
-            help='eye or random')
+            help='create batches on: doc/label')
         self.parser.add_argument(
             '--sampling_type',
             dest='sampling_type',

@@ -169,7 +169,11 @@ class SparseLabels(LabelsBase):
     """
 
     def __init__(self, data_dir, fname, Y=None, normalize=False):
+        self.Yt = None
         super().__init__(data_dir, fname, Y)
+
+    def _init_transposed(self):
+        self.Yt = self.transpose().tocsr()
 
     def __getitem__(self, index):
         y = self.Y[index].indices

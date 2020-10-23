@@ -21,7 +21,7 @@ gen_aux_mapping () {
 }
 
 clean_up(){
-    echo "clean test train data copy"
+    echo "clean test train data"
     rm -rf ${trn_ft_file} ${trn_lbl_file} ${tst_ft_file} ${tst_lbl_file}
 }
 

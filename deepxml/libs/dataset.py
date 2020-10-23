@@ -19,7 +19,7 @@ def construct_dataset(_type, data_dir, fname_features, fname_labels=None,
                       keep_invalid=False, feature_type='sparse',
                       feature_indices=None, label_indices=None,
                       label_feature_indices=None, shortlist_type='static',
-                      shorty=None, pretrained_shortlist=None):
+                      batch_type='label', shorty=None, pretrained_shortlist=None):
     if _type == 'full':
         return DatasetDense(
             data_dir, fname_features, fname_labels, fname_label_features,
@@ -27,12 +27,22 @@ def construct_dataset(_type, data_dir, fname_features, fname_labels=None,
             label_feature_indices, keep_invalid, normalize_features,
             normalize_labels, feature_type)
     elif _type == 'embedding':
-        return DatasetEmbedding(
-            data_dir, fname_features, fname_labels, fname_label_features,
-            data, model_dir, mode, feature_indices, label_indices,
-            label_feature_indices, keep_invalid, normalize_features,
-            normalize_labels, size_shortlist,
-            feature_type, shortlist_type, shorty)
+        if batch_type == 'doc':
+            return DatasetEmbedding(
+                data_dir, fname_features, fname_labels, fname_label_features,
+                data, model_dir, mode, feature_indices, label_indices,
+                label_feature_indices, keep_invalid, normalize_features,
+                normalize_labels, size_shortlist,
+                feature_type, shortlist_type, shorty)
+        elif batch_type == 'label':
+            return DatasetEmbeddingBL(
+                data_dir, fname_features, fname_labels, fname_label_features,
+                data, model_dir, mode, feature_indices, label_indices,
+                label_feature_indices, keep_invalid, normalize_features,
+                normalize_labels, size_shortlist,
+                feature_type, shortlist_type, shorty)
+        else:
+            raise NotImplementedError("Unknown batch type!")
     elif _type == 'shortlist':
         return DatasetShortlist(
             data_dir, fname_features, fname_labels, fname_label_features,
@@ -158,6 +168,8 @@ class DatasetDense(DatasetBase):
 class DatasetEmbedding(DatasetBase):
     """Dataset to load and use XML-Datasets for embedding based
     methods, i.e., where label features are required while batching
+
+    * batching is done over document by default
     Parameters
     ---------
     data_dir: str
@@ -266,17 +278,17 @@ class DatasetEmbedding(DatasetBase):
         data_obj['valid_labels'] = valid_labels
 
     def get_shortlist(self, index):
-        """Get data with shortlist for given data index
+        """Get label shortlist for given document index
         """
         pos_labels, _ = self.labels[index]
         return self.shortlist.query(1, pos_labels)[0], pos_labels
 
     def __getitem__(self, index):
-        """Get features and labels for index
+        """Get features and labels for index (batching over document)
         Arguments
         ---------
         index: int
-            data for this index
+            data for this index (document)
 
         Returns
         -------
@@ -288,7 +300,7 @@ class DatasetEmbedding(DatasetBase):
             labels_mask: 1 for relevant; 0 otherwise
             sim: similarity (used during prediction only)
         label features: a list of np.ndarrays or tuples
-            * features for multiple labels are arranged in a list
+            * features for sampled labels (arranged in a list)
             for dense: np.ndarray
             for sparse: feature indices and their weights
         """
@@ -296,6 +308,97 @@ class DatasetEmbedding(DatasetBase):
         y, ind = self.get_shortlist(index)
         yf = self.label_features[y]  # only one index for now
         return x, y, yf, ind
+
+
+class DatasetEmbeddingBL(DatasetEmbedding):
+    """Dataset to load and use XML-Datasets for embedding based
+    methods, i.e., where label features are required while batching
+    * batching is done over labels
+
+    Parameters
+    ---------
+    data_dir: str
+        data files are stored in this directory
+    fname_features: str
+        feature file (libsvm or pickle)
+    fname_labels: str
+        labels file (libsvm or pickle)    
+    fname_lbl_features: str
+        features for each label (libsvm or pickle)    
+    data: dict, optional, default=None
+        Read data directly from this obj rather than files
+        Files are ignored if this is not None
+        Keys: 'X', 'Y'
+    model_dir: str, optional, default=''
+        Dump data like valid labels here
+    mode: str, optional, default='train'
+        Mode of the dataset
+    feature_indices: np.ndarray or None, optional, default=None
+        Train with selected features only
+    label_indices: np.ndarray or None, optional, default=None
+        Train for selected labels only
+    keep_invalid: bool, optional, default=False
+        Don't touch data points or labels
+    normalize_features: bool, optional, default=True
+        Normalize data points to unit norm
+    normalize_lables: bool, optional, default=False
+        Normalize labels to convert in probabilities
+        Useful in-case on non-binary labels
+    feature_type: str, optional, default='sparse'
+        sparse or dense features
+    shortlist_method: str, optional, default='dynamic'
+        type of shortlist (static or dynamic)
+    """
+
+    def __init__(self, data_dir, fname_features, fname_labels,
+                 fname_label_features, data=None, model_dir='',
+                 mode='train', feature_indices=None, label_indices=None,
+                 label_feature_indices=None, keep_invalid=False,
+                 normalize_features=True, normalize_labels=False,
+                 size_shortlist=-1, feature_type='sparse',
+                 shortlist_type='dynamic', shorty=None):
+        super().__init__(data_dir, fname_features, fname_labels, fname_label_features, 
+                         data, model_dir, mode, feature_indices, label_indices,
+                         label_feature_indices, keep_invalid, normalize_features,
+                         normalize_labels, size_shortlist,
+                         feature_type, shortlist_type, shorty)
+        self.labels._init_transposed()
+        print(self.__len__(), self.labels.Yt.shape)
+
+    def get_shortlist(self, index):
+        """Get document shortlist for given label index
+        """
+        pos_docs = self.labels.Yt[index].indices
+        return self.shortlist.query(1, pos_docs)[0], pos_docs
+
+    def __getitem__(self, index):
+        """Get features and labels for index (batching over labels)
+        Arguments
+        ---------
+        index: int
+            data for this index (label)
+
+        Returns
+        -------
+        label features: np.ndarray or tuple
+            for dense: np.ndarray
+            for sparse: feature indices and their weights
+        document: tuple
+            shortlist: document indices in the shortlist
+            document_mask: 1 for relevant; 0 otherwise
+            sim: similarity (used during prediction only)
+        document features: a list of np.ndarrays or tuples
+            * features for sampled documents (arranged in a list)
+            for dense: np.ndarray
+            for sparse: feature indices and their weights
+        """
+        yf = self.label_features[index]
+        y, ind = self.get_shortlist(index)
+        x = self.features[y]  # only one index for now
+        return yf, y, x, ind
+
+    def __len__(self):
+        return self.num_labels
 
 
 class DatasetShortlist(DatasetEmbedding):

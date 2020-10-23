@@ -66,8 +66,7 @@ DEFAULT_PARAMS="--dataset ${dataset} \
                 --share_weights \
                 --top_k ${topk} \
                 --seed ${seed} \
-		        --trans_method_document ${current_working_dir}/shortlist.json \
-		        --trans_method_label ${current_working_dir}/shortlist.json \
+		        --net_config ${current_working_dir}/shortlist.json \
                 --num_centroids ${num_centroids} \
                 --model_fname ${MODEL_NAME} ${extra_params} \
                 --get_only knn clf"
@@ -75,15 +74,14 @@ DEFAULT_PARAMS="--dataset ${dataset} \
 TRAIN_PARAMS="  --dlr_factor $dlr_factor \
                 --dlr_step $dlr_step \
                 --batch_size $batch_size \
-                --dropout 0.5 
                 --optim Adam \
                 --model_method shortlist \
                 --shortlist_type hybrid \
                 --lr ${learning_rate} \
                 --efS 300 \
                 --num_nbrs 500 \
-		--loss cosine_embedding \
-		--margin 0.01 \
+		        --loss cosine_embedding \
+		        --margin 0.4 \
                 --efC 300 \
                 --M 100 \
                 --use_shortlist \

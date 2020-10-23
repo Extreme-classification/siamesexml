@@ -58,9 +58,9 @@ DEFAULT_PARAMS="--dataset ${dataset} \
                 --model_fname ${MODEL_NAME} ${extra_params} \
                 --get_only knn clf"
 
-TRAIN_PARAMS="  --trans_method_document ${current_working_dir}/embedding.json \
-                --trans_method_label ${current_working_dir}/embedding.json \
-                --dropout 0.5 --optim Adam \
+TRAIN_PARAMS="  --net_config ${current_working_dir}/embedding.json \
+                --optim Adam \
+                --batch_type label \
                 --lr $learning_rate \
                 --num_nbrs 1 \
                 --margin 0.2 \
@@ -98,7 +98,7 @@ EXTRACT_PARAMS="--dataset ${dataset} \
 
 
 ./run_base.sh "train" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${TRAIN_PARAMS}"
-./run_base.sh "predict" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${PREDICT_PARAMS}"
+#./run_base.sh "predict" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${PREDICT_PARAMS}"
 
 for doc in ${docs[*]} 
 do 
