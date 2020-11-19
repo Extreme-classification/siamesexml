@@ -18,12 +18,12 @@
     },
 
     "transform_fine_doc": {
-        "order": ["residual"],
 	    "residual": {
 	        "input_size": "#ARGS.embedding_dims;",
 	        "output_size": "#ARGS.embedding_dims;",
-	        "dropout": 0.5,
-	        "init": "eye"
+            "dropout": 0.5,
+            "fix_radius": false,
+            "init_radius": 1
         }
     },
 

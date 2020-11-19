@@ -12,6 +12,7 @@ import math
 from operator import itemgetter
 from libs.clustering import Cluster
 from libs.utils import map_neighbors, map_centroids, map_dense
+from libs.random_walk import RandomWalk
 
 
 class Shortlist(object):
@@ -330,13 +331,18 @@ class ShortlistMIPS(Shortlist):
         super().__init__(method, num_neighbours, M, efC, efS, num_threads)
         self.valid_indices = None
 
-    def fit(self, X, *args, **kwargs):
-        norms = np.square(X).sum(axis=1)
-        ind = np.where(norms > 0)[0]
+    def fit(self, X, Y=None, *args, **kwargs):
+        ind = np.where(np.square(X).sum(axis=1) > 0)[0]
+        if Y is not None:
+            ind_1 = np.where(np.array(Y.sum(axis=0)).ravel() > 0)[0]
+            ind = np.intersect1d(ind, ind_1)
         if len(ind) < len(X):
             self.valid_indices = ind
             X = X[self.valid_indices]
-        super().fit(X)  
+            if Y is not None:
+                cooc = RandomWalk().simulate(Y[:, self.valid_indices])
+                X = cooc @ X
+        super().fit(X)
 
     def query(self, X, *args, **kwargs):
         ind, sim = super().query(X)
@@ -433,7 +439,7 @@ class ShortlistEnsemble(object):
         self.pad_ind = Y.shape[1]
         self.num_labels = Y.shape[1]
         self.kcentroid.fit(X, Y)
-        self.kembed.fit(Yf)
+        self.kembed.fit(Yf, Y)
         if self.knn is not None:
             self.knn.fit(X, Y)
 
