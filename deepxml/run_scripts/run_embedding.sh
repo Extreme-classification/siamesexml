@@ -16,7 +16,7 @@ topk=${14}
 shortlist_method=${16}
 seed=${17}
 extra_params="${18}"
-init='pretrained'
+init='random'
 data_dir="${work_dir}/data"
 current_working_dir=$(pwd)
 docs=("trn" "tst")
@@ -52,14 +52,14 @@ DEFAULT_PARAMS="--dataset ${dataset} \
                 --ts_label_fname ${tst_lbl_file} \
                 --lbl_feat_fname ${lbl_ft_file} \
                 --top_k $topk \
+                --net_config ${current_working_dir}/embedding.json \
                 --seed ${seed} \
                 --shortlist_method random \
                 --share_weights \
                 --model_fname ${MODEL_NAME} ${extra_params} \
                 --get_only knn clf"
 
-TRAIN_PARAMS="  --net_config ${current_working_dir}/embedding.json \
-                --optim Adam \
+TRAIN_PARAMS="  --optim Adam \
                 --batch_type label \
                 --lr $learning_rate \
                 --num_nbrs 1 \
@@ -87,11 +87,10 @@ PREDICT_PARAMS="--model_method full \
 EXTRACT_PARAMS="--dataset ${dataset} \
                 --data_dir ${work_dir}/data \
 		--share_weights \
+                --net_config ${current_working_dir}/embedding.json \
 		--shortlist_method  random \
 		--vocabulary_dims_document ${vocabulary_dims} \
 		--vocabulary_dims_label ${vocabulary_dims} \
-		--trans_method_document ${current_working_dir}/embedding.json \
-		--trans_method_label ${current_working_dir}/embedding.json \
                 --model_method embedding \
                 --model_fname ${MODEL_NAME}\
                 --batch_size 512 ${extra_params}"
@@ -99,7 +98,7 @@ EXTRACT_PARAMS="--dataset ${dataset} \
 
 ./run_base.sh "train" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${TRAIN_PARAMS}"
 #./run_base.sh "predict" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${PREDICT_PARAMS}"
-
+exit
 for doc in ${docs[*]} 
 do 
     ./run_base.sh "extract" $dataset $work_dir $dir_version/$quantile $MODEL_NAME "${EXTRACT_PARAMS} --ts_feat_fname ${doc}_X_Xf.txt --out_fname export/${doc}_emb"

@@ -105,14 +105,22 @@ def collate_sparse(x, pad_val=0.0, has_weight=False, dtype=torch.FloatTensor):
 def construct_selection(sel_pos_indices, pos_indices):
     # Will use numpy; pytorch intersect1d is weird
     batch_size = pos_indices.shape[0]
-    selection = torch.zeros((batch_size, batch_size))
-    for (i, _) in enumerate(pos_indices):
-        intersection = np.intersect1d(sel_pos_indices, pos_indices[i])
-        result = np.zeros(batch_size)
+    selection = np.zeros((batch_size, batch_size), dtype=np.float32)
+
+    sel_pos_indices_set = set(sel_pos_indices)
+    for (i, item) in enumerate(pos_indices):
+        intersection = set(item).intersection(sel_pos_indices_set)
+        result = np.zeros(batch_size, dtype=np.float32)
         for idx in intersection:
             result += (idx == sel_pos_indices)
-        selection[i] = torch.from_numpy(result)
-    return selection
+        selection[i] = result
+    # for (i, _) in enumerate(pos_indices):
+    #     intersection = np.intersect1d(sel_pos_indices, pos_indices[i])
+    #     result = np.zeros(batch_size)
+    #     for idx in intersection:
+    #         result += (idx == sel_pos_indices)
+    #     selection[i] = torch.from_numpy(result)
+    return torch.from_numpy(selection)
 
 
 def get_iterator(x, ind=None):

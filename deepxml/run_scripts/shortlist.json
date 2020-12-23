@@ -18,6 +18,7 @@
     },
 
     "transform_fine_doc": {
+        "order": ["residual"],
 	    "residual": {
 	        "input_size": "#ARGS.embedding_dims;",
 	        "output_size": "#ARGS.embedding_dims;",

@@ -109,6 +109,7 @@ PREDICT_PARAMS="--efS 300 \
 EXTRACT_PARAMS="--dataset ${dataset} \
                 --data_dir=${work_dir}/data \
                 --use_shortlist \
+                --net_config ${current_working_dir}/shortlist.json \
                 --model_method shortlist \
                 --ns_method ${ns_method} \
                 --model_fname ${MODEL_NAME} \
