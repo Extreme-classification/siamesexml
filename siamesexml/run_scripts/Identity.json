@@ -1,0 +1,13 @@
+{
+    "representation_dims": "#ARGS.embedding_dims;",
+    "transform_coarse": {
+        "order": ["_identity"],
+        "_identity": {}
+    },
+    "transform_fine": {
+        "order": ["batchnorm1d"],
+        "batchnorm1d": {
+            "num_features": 300
+        }
+    }
+}
