@@ -121,7 +121,10 @@ The given code can be utilized as follows. A json file is used to specify archit
     year = "2021"
 }
 ```
-
+## YOU MAY ALSO LIKE
+- [DeepXML: A Deep Extreme Multi-Label Learning Framework Applied to Short Text Documents](https://github.com/Extreme-classification/deepxml)
+- [DECAF: Deep Extreme Classification with Label Features](https://github.com/Extreme-classification/DECAF)
+- [ECLARE: Extreme Classification with Label Graph Correlations](https://github.com/Extreme-classification/ECLARE)
 ## References
 
 ---
