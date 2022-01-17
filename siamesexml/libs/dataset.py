@@ -119,14 +119,14 @@ class DatasetDense(DatasetBase):
             label_feature_indices = feature_indices
         if label_indices is not None:
             ind = np.loadtxt(label_indices, dtype=np.int64)
-            self.labels.index_select(ind, axis=1)
-            self.label_features.index_select(ind, axis=0)
+            self.labels._index_select(ind, axis=1)
+            self.label_features._index_select(ind, axis=0)
         if feature_indices is not None:
             ind = np.loadtxt(feature_indices, dtype=np.int64)
-            self.features.index_select(ind, axis=1)
+            self.features._index_select(ind, axis=1)
         if label_feature_indices is not None:
             ind = np.loadtxt(label_feature_indices, dtype=np.int64)
-            self.label_features.index_select(ind, axis=1)
+            self.label_features._index_select(ind, axis=1)
 
     def _process_labels_train(self, data_obj):
         """Process labels for train data
@@ -138,8 +138,8 @@ class DatasetDense(DatasetBase):
         ind_1 = self.label_features.get_valid()
         valid_labels = np.intersect1d(ind_0, ind_1)
         self._valid_labels = valid_labels
-        self.label_features.index_select(valid_labels, axis=0)
-        self.labels.index_select(valid_labels, axis=1)
+        self.label_features._index_select(valid_labels, axis=0)
+        self.labels._index_select(valid_labels, axis=1)
         data_obj['valid_labels'] = valid_labels
 
     def __getitem__(self, index):
@@ -247,14 +247,14 @@ class DatasetEmbedding(DatasetBase):
             label_feature_indices = feature_indices
         if label_indices is not None:
             ind = np.loadtxt(label_indices, dtype=np.int64)
-            self.labels.index_select(ind, axis=1)
-            self.label_features.index_select(ind, axis=0)
+            self.labels._index_select(ind, axis=1)
+            self.label_features._index_select(ind, axis=0)
         if feature_indices is not None:
             ind = np.loadtxt(feature_indices, dtype=np.int64)
-            self.features.index_select(ind, axis=1)
+            self.features._index_select(ind, axis=1)
         if label_feature_indices is not None:
             ind = np.loadtxt(label_feature_indices, dtype=np.int64)
-            self.label_features.index_select(ind, axis=1)
+            self.label_features._index_select(ind, axis=1)
 
     def _process_labels_train(self, data_obj):
         """Process labels for train data
@@ -262,12 +262,12 @@ class DatasetEmbedding(DatasetBase):
             - Remove labels without any features
         """
         data_obj['num_labels'] = self.num_labels
-        ind_0 = self.labels.get_valid(axis=0)
-        ind_1 = self.label_features.get_valid(axis=1)
+        ind_0 = self.labels.get_valid_indices(axis=0)
+        ind_1 = self.label_features.get_valid_indices(axis=1)
         valid_labels = np.intersect1d(ind_0, ind_1)
         self._valid_labels = valid_labels
-        self.label_features.index_select(valid_labels, axis=0)
-        self.labels.index_select(valid_labels, axis=1)
+        self.label_features._index_select(valid_labels, axis=0)
+        self.labels._index_select(valid_labels, axis=1)
         data_obj['valid_labels'] = valid_labels
 
     def get_shortlist(self, index):

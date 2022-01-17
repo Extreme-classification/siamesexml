@@ -1,11 +1,7 @@
 import numpy as np
-import _pickle as pickle
-import operator
 import os
 from .lookup import Table
 from .sampling import NegativeSampler
-from scipy.sparse import load_npz
-from xclib.utils import sparse as sp
 
 
 def construct_handler(shortlist_method, num_labels, shortlist=None,
@@ -51,7 +47,7 @@ class ShortlistHandlerBase(object):
 
     def __init__(self, num_labels, shortlist, model_dir='',
                  mode='train', size_shortlist=-1, 
-                 label_mapping=None, max_pos=10):
+                 label_mapping=None, max_pos=20):
         self.model_dir = model_dir
         self.size_shortlist = size_shortlist
         self.mode = mode

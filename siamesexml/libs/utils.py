@@ -1,9 +1,8 @@
 import numpy as np
-import torch
 import json
 import os
-from scipy.sparse import csr_matrix, save_npz
-import numba as nb
+from scipy.sparse import save_npz
+from xclib.utils.sparse import _map_cols
 
 
 def save_predictions(preds, result_dir, valid_labels, num_samples,
@@ -13,8 +12,8 @@ def save_predictions(preds, result_dir, valid_labels, num_samples,
         for _fname, _pred in preds.items():
             if _fname in get_fnames:
                 if valid_labels is not None:
-                    predicted_labels = map_to_original(
-                        _pred, valid_labels, _shape=(num_samples, num_labels))
+                    predicted_labels = _map_cols(
+                        _pred, valid_labels, shape=(num_samples, num_labels))
                 else:
                     predicted_labels = _pred
                 save_npz(os.path.join(
@@ -22,53 +21,12 @@ def save_predictions(preds, result_dir, valid_labels, num_samples,
                     predicted_labels, compressed=False)
     else:
         if valid_labels is not None:
-            predicted_labels = map_to_original(
-                preds, valid_labels, _shape=(num_samples, num_labels))
+            predicted_labels = _map_cols(
+                preds, valid_labels, shape=(num_samples, num_labels))
         else:
             predicted_labels = preds
         save_npz(os.path.join(result_dir, '{}.npz'.format(prefix)),
                  predicted_labels, compressed=False)
-
-
-def append_padding_classifier_one(classifier, num_labels,
-                                  key_w='classifier.weight',
-                                  key_b='classifier.bias'):
-    _num_labels, dims = classifier[key_w].size()
-    if _num_labels != num_labels:
-        status = "Appended padding classifier."
-        _device = classifier[key_w].device
-        classifier[key_w] = torch.cat(
-            [classifier[key_w], torch.zeros(1, dims).to(_device)], 0)
-        classifier[key_b] = torch.cat(
-            [classifier[key_b], -1e5*torch.ones(1, 1).to(_device)], 0)
-    else:
-        status = "Shapes are fine, Not padding again."
-    return status
-
-
-def append_padding_classifier(net, num_labels):
-    if isinstance(num_labels, list):
-        status = []
-        for idx, item in enumerate(num_labels):
-            status.append(append_padding_classifier_one(
-                net, item, 'classifier.classifier.{}.weight'.format(
-                    idx), 'classifier.classifier.{}.bias'.format(idx)))
-        print("Padding not implemented for distributed classifier for now!")
-    else:
-        return append_padding_classifier_one(net, num_labels)
-
-
-def append_padding_embedding(embeddings):
-    """
-        Append a row of zeros as embedding for <PAD>
-        Args:
-            embeddings: numpy.ndarray: embedding matrix
-        Returns:
-            embeddings: numpy.ndarray: transformed embedding matrix
-    """
-    embedding_dim = embeddings.shape[1]
-    app = np.zeros((1, embedding_dim))
-    return np.vstack([app, embeddings])
 
 
 def get_header(fname):
@@ -89,15 +47,6 @@ def get_data_stats(fname, key):
         return tuple(out)
     else:
         return get(fname, key)
-
-
-def map_to_original(mat, mapping, _shape, axis=1):
-    mat = mat.tocsr()
-    row_idx, col_idx = mat.nonzero()
-    vals = np.array(mat[row_idx, col_idx]).squeeze()
-    col_indices = list(map(lambda x: mapping[x], col_idx))
-    return csr_matrix(
-        (vals, (np.array(row_idx), np.array(col_indices))), shape=_shape)
 
 
 def save_parameters(fname, params):

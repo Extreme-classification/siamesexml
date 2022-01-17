@@ -1,12 +1,7 @@
 import torch
-import _pickle as pickle
+import pickle
 import os
-import sys
-from scipy.sparse import lil_matrix
 import numpy as np
-from sklearn.preprocessing import normalize
-import xclib.data.data_utils as data_utils
-import operator
 from .features import construct as construct_f
 from .labels import construct as construct_l
 
@@ -37,7 +32,7 @@ class DatasetTensor(torch.utils.data.Dataset):
         data = construct_f(data_dir, fname, data, normalize, _type)
         if indices is not None:
             indices = np.loadtxt(indices, dtype=np.int64)
-            data.index_select(indices)
+            data._index_select(indices)
         return data
 
     def __len__(self):
@@ -116,12 +111,12 @@ class DatasetBase(torch.utils.data.Dataset):
     def _remove_samples_wo_features_and_labels(self):
         """Remove instances if they don't have any feature or label
         """
-        indices = self.features.get_valid(axis=1)
+        indices = self.features.get_valid_indices(axis=1)
         if self.labels is not None:
-            indices_labels = self.labels.get_valid(axis=1)
+            indices_labels = self.labels.get_valid_indices(axis=1)
             indices = np.intersect1d(indices, indices_labels)
-            self.labels.index_select(indices, axis=0)
-        self.features.index_select(indices, axis=0)
+            self.labels._index_select(indices, axis=0)
+        self.features._index_select(indices, axis=0)
 
     def index_select(self, feature_indices, label_indices):
         """Transform feature and label matrix to specified
@@ -129,10 +124,10 @@ class DatasetBase(torch.utils.data.Dataset):
         """
         if label_indices is not None:
             label_indices = np.loadtxt(label_indices, dtype=np.int32)
-            self.labels.index_select(label_indices, axis=1)
+            self.labels._index_select(label_indices, axis=1)
         if feature_indices is not None:
             feature_indices = np.loadtxt(feature_indices, dtype=np.int32)
-            self.features.index_select(feature_indices, axis=1)
+            self.features._index_select(feature_indices, axis=1)
 
     def load_features(self, data_dir, fname, X,
                       normalize_features, feature_type):
@@ -199,7 +194,7 @@ class DatasetBase(torch.utils.data.Dataset):
            example
         """
         valid_labels = data_obj['valid_labels']
-        self.labels.index_select(valid_labels)
+        self.labels._index_select(valid_labels, axis=1)
 
     def _process_labels(self, model_dir, _split=None):
         """Process labels to handle labels without any training instance;

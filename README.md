@@ -35,6 +35,7 @@ Code for _SiameseXML: Siamese networks meet extreme classifiers with 100M labels
 ```txt
 * Download the (zipped file) BoW features from XML repository.  
 * Extract the zipped file into data directory. 
+* Yf.txt file contains label features; Either change the file name of make a soft-link to lbl_X_Xf.txt
 * The following files should be available in <work_dir>/data/<dataset> for new datasets (ignore the next step)
     - trn_X_Xf.txt
     - trn_X_Y.txt
