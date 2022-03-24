@@ -126,6 +126,7 @@ The given code can be utilized as follows. A json file is used to specify archit
 - [DeepXML: A Deep Extreme Multi-Label Learning Framework Applied to Short Text Documents](https://github.com/Extreme-classification/deepxml)
 - [DECAF: Deep Extreme Classification with Label Features](https://github.com/Extreme-classification/DECAF)
 - [ECLARE: Extreme Classification with Label Graph Correlations](https://github.com/Extreme-classification/ECLARE)
+- [GalaXC: Graph Neural Networks with Labelwise Attention for Extreme Classification](https://github.com/Extreme-classification/GalaXC)
 ## References
 
 ---
