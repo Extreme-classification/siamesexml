@@ -543,6 +543,7 @@ class ModelShortlist(ModelBase):
                 shuffle=shuffle)
         self.logger.info("Loading validation data.")
         validation_loader = None
+        filter_map = None
         if validate:
             validation_dataset = self._create_dataset(
                 os.path.join(data_dir, dataset),
